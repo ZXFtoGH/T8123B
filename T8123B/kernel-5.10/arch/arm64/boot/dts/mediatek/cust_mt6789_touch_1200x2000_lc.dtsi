@@ -1,0 +1,121 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Copyright (C) 2020 MediaTek Inc.
+ */
+/* TOUCH start */
+&spi1 {
+    mediatek,pad-select = <0>,<1>;
+    status = "okay";
+    #address-cells = <1>;
+    #size-cells = <0>;
+    pinctrl-names = "default", "ts_int_active",
+        "ts_reset_active", "ts_int_suspend",
+        "ts_reset_suspend", "spi_mode",
+        "spi1_to_gpio";
+    pinctrl-0 = <&ctp_pins_default>;
+    pinctrl-1 = <&ctp_int_active>;
+    pinctrl-2 = <&ctp_reset_active>;
+    pinctrl-3 = <&ctp_int_suspend>;
+    pinctrl-4 = <&ctp_reset_suspend>;
+    pinctrl-5 = <&ctp_spi_mode>;
+    pinctrl-6 = <&ctp_spi1_to_gpio>;
+
+    focaltech@0 {
+        compatible = "focaltech,fts";
+        reg = <0x0>;
+        spi-max-frequency = <6000000>;
+        interrupt-parent = <&pio>;
+        interrupts = <9 IRQ_TYPE_EDGE_FALLING 9 0>;
+        focaltech,reset-gpio = <&pio 152 0>;
+        focaltech,irq-gpio = <&pio 9 02>;
+        focaltech,max-touch-number = <10>;
+        focaltech,display-coords =  <0 0 1200 2000>;
+        status = "okay";
+    };
+
+    himax_touch@1 {
+        compatible = "himax,hxcommon";
+        reg = <1>; //Same as CS ID
+        spi-max-frequency = <10000000>;
+        // spi-cpha;
+        interrupt-parent = <&pio>;
+        himax,irq-gpio = <&pio 9 0x2800>;
+        himax,rst-gpio = <&pio 152 0x0000>;
+        himax,lcm-id0 = <&pio 51 0x00>;
+        himax,lcm-id1 = <&pio 50 0x00>;
+        himax,panel-coords = <0 1200 0 2000>;
+        himax,display-coords = <0 1200 0 2000>;
+        report_type = <1>;
+    };
+};
+&pio {
+    ctp_pins_default: pins_default {
+    };
+    ctp_ts_int_active: int_active {
+        pins_cmd_dat {
+            pinmux = <PINMUX_GPIO9__FUNC_GPIO9>;
+            input-enable;
+        };
+    };
+    ctp_ts_reset_active: reset_active {
+        pins_cmd_dat {
+            pinmux = <PINMUX_GPIO152__FUNC_GPIO152>;
+            output-high;
+        };
+    };
+    ctp_ts_int_suspend: int_suspend {
+        pins_cmd_dat {
+            pinmux = <PINMUX_GPIO9__FUNC_GPIO9>;
+            output-low;
+        };
+    };
+    ctp_ts_reset_suspend: reset_suspend {
+        pins_cmd_dat {
+            pinmux = <PINMUX_GPIO152__FUNC_GPIO152>;
+            output-low;
+        };
+    };
+    ctp_int_active: int1_active {
+        pins_cmd_dat {
+            pinmux = <PINMUX_GPIO9__FUNC_GPIO9>;
+            input-enable;
+        };
+    };
+    ctp_reset_active: reset1_active {
+        pins_cmd_dat {
+            pinmux = <PINMUX_GPIO152__FUNC_GPIO152>;
+            output-high;
+        };
+    };
+    ctp_int_suspend: int1_suspend {
+        pins_cmd_dat {
+            pinmux = <PINMUX_GPIO9__FUNC_GPIO9>;
+            output-low;
+        };
+    };
+    ctp_reset_suspend: reset1_suspend {
+        pins_cmd_dat {
+            pinmux = <PINMUX_GPIO152__FUNC_GPIO152>;
+            output-low;
+        };
+    };
+    ctp_spi_mode: spimode_default {
+        pins_cmd_dat {
+            pinmux = <PINMUX_GPIO34__FUNC_SPI1_CLK>,
+                <PINMUX_GPIO35__FUNC_SPI1_CSB>,
+                <PINMUX_GPIO36__FUNC_SPI1_MO>,
+                <PINMUX_GPIO37__FUNC_SPI1_MI>;
+            drive-strength = <2>;
+        };
+    };
+    ctp_spi1_to_gpio: spimode_to_gpio {
+        pins_cmd_dat {
+            pinmux = <PINMUX_GPIO34__FUNC_GPIO34>,
+                <PINMUX_GPIO35__FUNC_GPIO35>,
+                <PINMUX_GPIO36__FUNC_GPIO36>,
+                <PINMUX_GPIO37__FUNC_GPIO37>;
+            output-low;
+        };
+    };
+};
+/* TOUCH end */
