@@ -1,0 +1,5 @@
+config CUSTOM_MTK_KERNEL_POGO
+	tristate "MediaTek USB POGO Support"
+	default n
+	help
+	  pogo keypad for MTK pakage.

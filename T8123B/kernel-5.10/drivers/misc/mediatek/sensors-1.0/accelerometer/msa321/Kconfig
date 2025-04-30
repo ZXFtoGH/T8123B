@@ -1,0 +1,8 @@
+config MTK_MSA321
+	bool "MTK_MSA321 for MediaTek package"
+	help
+	  The MSA321 is a highly integrated,
+	  low power internal measurement unit
+	  that provides precise acceleration
+	  measurement.
+	  this config will turn on accelerometer feature.

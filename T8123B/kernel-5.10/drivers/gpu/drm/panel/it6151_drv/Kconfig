@@ -1,0 +1,7 @@
+config DRM_PANEL_EDP_IT6151_DRV
+	tristate "Generic IT6151 DRV EDP panel driver"
+	depends on OF
+	depends on BACKLIGHT_CLASS_DEVICE
+	select VIDEOMODE_HELPERS
+	help
+	  This driver supports IT6151 DRV EDP panels

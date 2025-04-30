@@ -1,0 +1,17 @@
+#
+# Focaltech Touchscreen driver configuration
+#
+
+config TOUCHSCREEN_FTS_COMMON
+    tristate "Focaltech Touchscreen"
+    depends on TOUCHSCREEN_FTS_FT8205P_SPI
+    default m
+    help
+      Say Y here if you have Focaltech touch panel.
+      If unsure, say N.
+
+config TOUCHSCREEN_FACTORY_DEBUG
+	tristate "touchscreen for factory test"
+	default n
+	help
+	  Say y here if you have chipone TDDI touch panel.

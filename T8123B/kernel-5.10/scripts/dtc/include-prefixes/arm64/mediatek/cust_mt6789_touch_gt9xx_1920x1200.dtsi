@@ -1,0 +1,81 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Copyright (C) 2020 MediaTek Inc.
+ */
+/* TOUCH start */
+&pio {
+	ts_int_default: tsintdefault {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO9__FUNC_GPIO9>;
+			input-enable;
+		};
+	};
+	ts_int_output_low: tsintoutlow {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO9__FUNC_GPIO9>;
+			output-low;
+		};
+	};
+	ts_int_output_high: tsintouthigh {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO9__FUNC_GPIO9>;
+			output-high;
+		};
+	};
+	ts_int_input: tsintinput {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO9__FUNC_GPIO9>;
+			input-enable;
+		};
+	};
+};
+
+&i2c0 {
+	gt9xx@14 {
+		compatible = "goodix,gt9xx_drv";
+		reg = <0x14>; 
+		status = "okay";
+		interrupt-parent = <&pio>;
+		interrupts = <9 IRQ_TYPE_EDGE_FALLING 9 0>;
+		pinctrl-names = "default", "int-output-low","int-output-high", "int-input";
+		pinctrl-0 = <&ts_int_default>;
+		pinctrl-1 = <&ts_int_output_low>;
+		pinctrl-2 = <&ts_int_output_high>;
+		pinctrl-3 = <&ts_int_input>;
+
+		vdd_en-gpios = <&pio 109 0x0000>;
+		reset-gpios = <&pio 152 0x0>;
+		irq-gpios = <&pio 9 0x0>;
+		irq-flags = <2>;	/* 1 rising, 2 falling */
+
+		touchscreen-max-id = <11>;
+		touchscreen-size-x = <1920>;
+		touchscreen-size-y = <1200>;
+		touchscreen-max-w = <512>;
+		touchscreen-max-p = <512>;
+		touchscreen-key-map = <172>, <158>; /*KEY_HOMEPAGE=172, KEY_BACK=158，KEY_MENU=139*/
+
+		goodix,slide-wakeup = <0>;
+		goodix,type-a-report = <0>;
+		goodix,driver-send-cfg = <0>;
+		goodix,resume-in-workqueue = <0>;
+		goodix,int-sync = <1>;
+		goodix,swap-x2y = <0>;
+		goodix,esd-protect = <0>;
+		goodix,auto-update-cfg = <0>;
+		goodix,power-off-sleep = <0>;
+		goodix,pen-suppress-finger = <0>;
+		goodix,cfg-group0 = [
+			52 80 07 B0 04 0A 3D 00 01 50 28 0C 50 32 03 03 00 00 0A 00 11 11 04 17 19 1D 14 95 35 CC
+			23 21 58 14 00 00 00 D9 04 2C 00 00 00 00 00 00 00 00 00 23 00 14 32 94 C0 52 00 00 00 04
+			8C 16 00 86 1A 00 81 1F 00 7F 26 00 7E 2D 00 7E 00 00 00 00 F0 4A 3A FF FF 27 00 00 00 00
+			00 00 00 00 00 00 14 14 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 01 02 03 04 05 06 07
+			08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 00 01 02 03 04 05 06 07
+			08 09 0A 0B 0C 0D 0E 0F 10 11 12 13 14 15 16 17 18 19 1B 1C 1D 1E 1F 20 21 22 23 24 25 26
+			27 28 29 2A 9A 01
+		];
+	};
+};
+/* TOUCH end */
+
+

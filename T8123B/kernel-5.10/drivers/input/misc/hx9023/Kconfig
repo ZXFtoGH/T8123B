@@ -1,0 +1,13 @@
+#
+# Mediatek SAR_HX9023
+#
+
+config SAR_HX9023
+	tristate "SAR HX9023 driver"
+	depends on I2C
+	help
+	  Say Y here if you have SAR HX9023 controller
+	  chip in your system.
+	  If unsure, say N.
+	  To compile this driver as a module, choose M here: the
+	  module will be called  HX9023 key.
