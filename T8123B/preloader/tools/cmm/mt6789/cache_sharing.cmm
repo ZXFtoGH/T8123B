@@ -1,0 +1,125 @@
+// mcusys register base
+&mp0_cluster_cfg0=0x0c53c8d0
+// offset
+&l3_share_FULLnHALF=(&FULL_SHARE<<0xa)
+&l3_share_pre_en=(1<<8)
+&l3_share_en=(1<<9)
+
+&cache_pwr_req=0x0
+if &FULL_SHARE==0
+(
+	&cache_pwr_req=0x30
+)
+else
+(
+	&cache_pwr_req=0x0
+)
+
+
+if &ENABLE_SHARE_SRAM==1
+(
+
+	; ==Step 1==
+	&config=data.long(c:&mp0_cluster_cfg0) /long
+	&config=&config|&l3_share_FULLnHALF
+	d.s c:&mp0_cluster_cfg0 %long &config   ; Set half sharing
+
+	; ==Step 2==
+	; MP0_CLUSTER_CFG0[8]
+	; Configured the "rg_l3c_share_pre_en" to 1 for fixing the SRAM power.
+	&config=data.long(c:&mp0_cluster_cfg0) /long
+	&config=&config|&l3_share_pre_en
+	d.s c:&mp0_cluster_cfg0 %long &config
+
+	; ==Step 3==
+	; Must ID_MMFR2_EL1[23:20] = 0x2 ; support dmb/isb/dsb
+	; Set SCTLR.CP15BEN[5] = 1,
+	; PL0 and PL1 execution of the CP15DMB,CP15DSB,and CP15ISB is enabled.
+	&sctlr=data.long(c15:0x0001) /long
+	&sctlr=(&sctlr|(0x1<<5));
+	d.s c15:0x0001 %long &sctlr
+
+	; ==Step 4==
+	; CP15DSB
+	; MCR p15,0,<Rt>,c7,c10,4 ; ignoring the value in Rt
+	d.s c15:0x04a7 %long 0x1
+
+	; ==Step 5==
+	; Configured the "CLUSTERPWRCTLR[7:4]"
+	; register to "0000" (FULL Share) or "0011" (HALF Share)
+	d.s SPR:0x30f35 %long &cache_pwr_req
+
+	; ==Step 6==
+	; Polling the "CLUSTERPWRSTAT[7:4]"
+	;register is equal to "0000" (FULL Share) or "0011" (HALF Share)
+	&clusterpwrctlr=data.long(SPR:0x30f37) /long
+	while(&clusterpwrctlr!=&cache_pwr_req)
+	(
+	d.s c15:0x04a7 %long 0x1 ; dsb
+	&clusterpwrctlr=data.long(SPR:0x30f37) /long
+	)
+
+	; ==Step 7==
+	; MP0_CLUSTER_CFG0[9]
+	; Configured the "rg_l3c_share_en" to 1 for enabling the L3 Share function.
+	&config=data.long(c:&mp0_cluster_cfg0) /long
+	&config=&config|&l3_share_en
+	d.s c:&mp0_cluster_cfg0 %long &config
+
+	; ==Step 8==
+	; CP15DSB
+	d.s c15:0x04a7 %long 0x1
+)
+else    ;; release share sram
+(
+	; ==Step 1==
+	&config=data.long(c:&mp0_cluster_cfg0) /long
+	&config=&config&~(&l3_share_en)
+	d.s c:&mp0_cluster_cfg0 %long &config
+
+	; ==Step 2==
+	; Must ID_MMFR2_EL1[23:20] = 0x2 ; support dmb/isb/dsb
+	; Set SCTLR.CP15BEN[5] = 1,
+	; PL0 and PL1 execution of the CP15DMB,CP15DSB,and CP15ISB is enabled.
+	&sctlr=data.long(c15:0x0001) /long
+	&sctlr=(&sctlr|(0x1<<5));
+	d.s c15:0x0001 %long &sctlr
+
+	; ==Step 3==
+	; CP15DSB
+	; MCR p15,0,<Rt>,c7,c10,4 ; ignoring the value in Rt
+	d.s c15:0x04a7 %long 0x1
+
+	; ==Step 4==
+	; Configured the "CLUSTERPWRCTLR[7:4]"
+	; register to "1111"
+	&config=data.long(SPR:0x30f35) /long
+	&config=&config|(0xf0)
+	d.s SPR:0x30f35 %long &config
+
+	; ==Step 5==
+	; CP15DSB
+	; MCR p15,0,<Rt>,c7,c10,4 ; ignoring the value in Rt
+	d.s c15:0x04a7 %long 0x1
+
+	; ==Step 6==
+	; Polling the "CLUSTERPWRSTAT[7:4]"
+	;register is equal to "1111"
+	&clusterpwrctlr=data.long(SPR:0x30f35) /long
+	while(&clusterpwrctlr!=0xf0)
+	(
+	d.s c15:0x04a7 %long 0x1 ; dsb
+	&clusterpwrctlr=data.long(SPR:0x30f35) /long
+	)
+
+	; ==Step 7==
+	&config=data.long(c:&mp0_cluster_cfg0) /long
+	&config=&config&~(&l3_share_pre_en)
+	d.s c:&mp0_cluster_cfg0 %long &config
+
+	; ==Step 8==
+	; CP15DSB
+	; MCR p15,0,<Rt>,c7,c10,4 ; ignoring the value in Rt
+	d.s c15:0x04a7 %long 0x1
+
+)

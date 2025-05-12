@@ -1,0 +1,1440 @@
+#ifndef _ACTIMING_H
+#define _ACTIMING_H
+
+/***********************************************************************/
+/*              Includes                                               */
+/***********************************************************************/
+#include "dramc_register.h"
+
+//Definitions to enable specific freq's LP4 ACTiming support (To save code size)
+#if (fcFOR_CHIP_ID == fcLepin)
+#define SUPPORT_LP5_DDR8533_ACTIM 0
+#define SUPPORT_LP5_DDR7500_ACTIM 1
+#define SUPPORT_LP5_DDR6400_ACTIM 1
+#define SUPPORT_LP5_DDR6000_ACTIM 0
+#define SUPPORT_LP5_DDR5500_ACTIM 1
+#define SUPPORT_LP5_DDR4800_ACTIM 0
+#define SUPPORT_LP5_DDR4266_ACTIM 1
+#define SUPPORT_LP5_DDR3733_ACTIM 0
+#define SUPPORT_LP5_DDR3200_ACTIM 1
+#define SUPPORT_LP5_DDR2667_ACTIM 1
+#define SUPPORT_LP5_DDR2400_ACTIM 0
+#define SUPPORT_LP5_DDR2133_ACTIM 1
+#define SUPPORT_LP5_DDR1866_ACTIM 1
+#define SUPPORT_LP5_DDR1600_ACTIM 0
+#define SUPPORT_LP5_DDR1200_ACTIM 0
+#define SUPPORT_LP5_DDR800_ACTIM 1
+#define SUPPORT_LP5_DDR400_ACTIM 0
+#else// if (fcFOR_CHIP_ID == fcFigeac)
+#define SUPPORT_LP5_DDR8533_ACTIM 0
+#define SUPPORT_LP5_DDR7500_ACTIM 0
+#define SUPPORT_LP5_DDR6400_ACTIM 0
+#define SUPPORT_LP5_DDR6000_ACTIM 0
+#define SUPPORT_LP5_DDR5500_ACTIM 1
+#define SUPPORT_LP5_DDR4800_ACTIM 0
+#define SUPPORT_LP5_DDR4266_ACTIM 1
+#define SUPPORT_LP5_DDR3733_ACTIM 0
+#define SUPPORT_LP5_DDR3200_ACTIM 1
+#define SUPPORT_LP5_DDR2667_ACTIM 0
+#define SUPPORT_LP5_DDR2400_ACTIM 0
+#define SUPPORT_LP5_DDR2133_ACTIM 1
+#define SUPPORT_LP5_DDR1866_ACTIM 1
+#define SUPPORT_LP5_DDR1600_ACTIM 1
+#define SUPPORT_LP5_DDR1200_ACTIM 1
+#define SUPPORT_LP5_DDR800_ACTIM 1
+#define SUPPORT_LP5_DDR400_ACTIM 0
+#endif
+
+#if (fcFOR_CHIP_ID == fcMT8139)
+#define SUPPORT_LP4_DDR4266_ACTIM 0
+#define SUPPORT_LP4_DDR3733_ACTIM 1
+#define SUPPORT_LP4_DDR3200_ACTIM 1
+#define SUPPORT_LP4_DDR2667_ACTIM 1
+#define SUPPORT_LP4_DDR2400_ACTIM 1
+#define SUPPORT_LP4_DDR2133_ACTIM 0
+#define SUPPORT_LP4_DDR1866_ACTIM 0
+#define SUPPORT_LP4_DDR1600_ACTIM 1
+#define SUPPORT_LP4_DDR1333_ACTIM 0
+#define SUPPORT_LP4_DDR1200_ACTIM 0
+#define SUPPORT_LP4_DDR800_ACTIM 0
+#define SUPPORT_LP4_DDR400_ACTIM 0
+#else// if (fcFOR_CHIP_ID == fcFigeac)
+#define SUPPORT_LP4_DDR4266_ACTIM 1
+#define SUPPORT_LP4_DDR3733_ACTIM 0
+#define SUPPORT_LP4_DDR3200_ACTIM 1
+#define SUPPORT_LP4_DDR2667_ACTIM 0
+#define SUPPORT_LP4_DDR2400_ACTIM 0
+#define SUPPORT_LP4_DDR2133_ACTIM 1
+#define SUPPORT_LP4_DDR1866_ACTIM 1
+#define SUPPORT_LP4_DDR1600_ACTIM 1
+#define SUPPORT_LP4_DDR1333_ACTIM 0
+#define SUPPORT_LP4_DDR1200_ACTIM 1
+#define SUPPORT_LP4_DDR800_ACTIM 1
+#define SUPPORT_LP4_DDR400_ACTIM 0
+#endif
+
+#define SUPPORT_DDR3_DDR1333_ACTIM 0
+#define SUPPORT_DDR3_DDR2133_ACTIM 0
+#define SUPPORT_DDR3_DDR1866_ACTIM 0
+#define SUPPORT_DDR3_DDR1600_ACTIM 0
+
+#define SUPPORT_DDR4_DDR3200_ACTIM 1
+#define SUPPORT_DDR4_DDR2933_ACTIM 0
+#define SUPPORT_DDR4_DDR2667_ACTIM 1
+#define SUPPORT_DDR4_DDR2400_ACTIM 1
+#define SUPPORT_DDR4_DDR1600_ACTIM 1
+#define SUPPORT_DDR4_DDR1333_ACTIM 0
+
+
+/*SetA/B*/
+#define Enable_WL_SetB_DDR8533    Enable_WL_SetB
+#define Enable_WL_SetB_DDR7500    Enable_WL_SetB
+#define Enable_WL_SetB_DDR6400    0
+#define Enable_WL_SetB_DDR6000    0
+#define Enable_WL_SetB_DDR5500    0
+#define Enable_WL_SetB_DDR4800    0
+#define Enable_WL_SetB_DDR4266    0
+#define Enable_WL_SetB_DDR3733    0
+#define Enable_WL_SetB_DDR3200    0
+#define Enable_WL_SetB_DDR2667    0
+#define Enable_WL_SetB_DDR2400    0
+#define Enable_WL_SetB_DDR2133    0
+#define Enable_WL_SetB_DDR1866    0
+#define Enable_WL_SetB_DDR1600    0
+#define Enable_WL_SetB_DDR1200    0
+#define Enable_WL_SetB_DDR800     Enable_WL_SetB
+#define Enable_WL_SetB_DDR400     Enable_WL_SetB
+
+/*CKR type for ddr1200~ddr3200*/
+/*LP5_DDR*_CKR= 0:CKR2 1:CKR4*/
+#if SUPPORT_LP5_DDR1200_ACTIM
+#define LP5_DDR1200_CKR 0
+#endif
+#if SUPPORT_LP5_DDR1600_ACTIM
+#define LP5_DDR1600_CKR 0
+#endif
+#if SUPPORT_LP5_DDR1866_ACTIM
+#define LP5_DDR1866_CKR 0
+#endif
+#if SUPPORT_LP5_DDR2133_ACTIM
+#define LP5_DDR2133_CKR 0
+#endif
+#if SUPPORT_LP5_DDR2400_ACTIM
+#define LP5_DDR2400_CKR 0
+#endif
+#if SUPPORT_LP5_DDR2667_ACTIM
+#define LP5_DDR2667_CKR 0
+#endif
+#if SUPPORT_LP5_DDR3200_ACTIM
+#define LP5_DDR3200_CKR 0
+#endif
+
+/* Used to keep track the total number of LP4 ACTimings */
+/* Since READ_DBI is enable/disabled using preprocessor C define
+ * -> Save code size by excluding unneeded ACTimingTable entries
+ * Note 1: READ_DBI on/off is for (LP4 data rate >= DDR2667 (FSP1))
+ * Must make sure DDR3733 is the 1st entry (DMCATRAIN_INTV is used)
+ */
+typedef enum
+{
+#if SUPPORT_LP4_DDR4266_ACTIM
+#if ENABLE_READ_DBI
+    AC_TIME_LP4_BYTE_DDR4266_RDBI_ON = 0,
+    AC_TIME_LP4_NORM_DDR4266_RDBI_ON,
+#else //(ENABLE_READ_DBI == 0)
+    AC_TIME_LP4_BYTE_DDR4266_RDBI_OFF,
+    AC_TIME_LP4_NORM_DDR4266_RDBI_OFF,
+#endif //ENABLE_READ_DBI
+#endif
+
+#if SUPPORT_LP4_DDR3733_ACTIM
+#if ENABLE_READ_DBI
+    AC_TIME_LP4_BYTE_DDR3733_RDBI_ON,
+    AC_TIME_LP4_NORM_DDR3733_RDBI_ON,
+#else //(ENABLE_READ_DBI == 0)
+    AC_TIME_LP4_BYTE_DDR3733_RDBI_OFF,
+    AC_TIME_LP4_NORM_DDR3733_RDBI_OFF,
+#endif //ENABLE_READ_DBI
+#endif
+
+#if SUPPORT_LP4_DDR3200_ACTIM
+#if ENABLE_READ_DBI
+    AC_TIME_LP4_BYTE_DDR3200_RDBI_ON,
+    AC_TIME_LP4_NORM_DDR3200_RDBI_ON,
+#else //(ENABLE_READ_DBI == 0)
+    AC_TIME_LP4_BYTE_DDR3200_RDBI_OFF,
+    AC_TIME_LP4_NORM_DDR3200_RDBI_OFF,
+#endif //ENABLE_READ_DBI
+#endif
+
+#if SUPPORT_LP4_DDR2667_ACTIM
+#if ENABLE_READ_DBI
+    AC_TIME_LP4_BYTE_DDR2667_RDBI_ON,
+    AC_TIME_LP4_NORM_DDR2667_RDBI_ON,
+#else //(ENABLE_READ_DBI == 0)
+    AC_TIME_LP4_BYTE_DDR2667_RDBI_OFF,
+    AC_TIME_LP4_NORM_DDR2667_RDBI_OFF,
+#endif //ENABLE_READ_DBI
+#endif
+
+#if SUPPORT_LP4_DDR2400_ACTIM
+    AC_TIME_LP4_BYTE_DDR2400_RDBI_OFF,
+    AC_TIME_LP4_NORM_DDR2400_RDBI_OFF,
+#endif
+
+#if SUPPORT_LP4_DDR2133_ACTIM
+    AC_TIME_LP4_NORM_DDR2133_RDBI_OFF,
+    AC_TIME_LP4_BYTE_DDR2133_RDBI_OFF,
+#endif
+
+#if SUPPORT_LP4_DDR1866_ACTIM
+    AC_TIME_LP4_BYTE_DDR1866_RDBI_OFF,
+    AC_TIME_LP4_NORM_DDR1866_RDBI_OFF,
+#endif
+
+#if SUPPORT_LP4_DDR1600_ACTIM
+    AC_TIME_LP4_BYTE_DDR1600_RDBI_OFF,
+    AC_TIME_LP4_NORM_DDR1600_RDBI_OFF,
+    AC_TIME_LP4_BYTE_DDR1600_DIV4_RDBI_OFF,
+    AC_TIME_LP4_NORM_DDR1600_DIV4_RDBI_OFF,
+#endif
+
+#if SUPPORT_LP4_DDR1333_ACTIM
+    AC_TIME_LP4_BYTE_DDR1333_RDBI_OFF,
+    AC_TIME_LP4_NORM_DDR1333_RDBI_OFF,
+#endif
+
+
+#if SUPPORT_LP4_DDR1200_ACTIM
+    AC_TIME_LP4_BYTE_DDR1200_RDBI_OFF,
+    AC_TIME_LP4_NORM_DDR1200_RDBI_OFF,
+    AC_TIME_LP4_BYTE_DDR1200_DIV4_RDBI_OFF,
+    AC_TIME_LP4_NORM_DDR1200_DIV4_RDBI_OFF,
+#endif
+
+#if SUPPORT_LP4_DDR800_ACTIM
+    AC_TIME_LP4_BYTE_DDR800_RDBI_OFF,
+    AC_TIME_LP4_NORM_DDR800_RDBI_OFF,
+    AC_TIME_LP4_BYTE_DDR800_DIV4_RDBI_OFF,
+    AC_TIME_LP4_NORM_DDR800_DIV4_RDBI_OFF,
+#endif
+
+#if SUPPORT_LP4_DDR400_ACTIM
+    AC_TIME_LP4_BYTE_DDR400_RDBI_OFF,
+    AC_TIME_LP4_NORM_DDR400_RDBI_OFF,
+#endif
+
+    AC_TIMING_NUMBER_LP4
+} AC_TIMING_LP4_COUNT_TYPE_T;
+
+#if 1//(SUPPORT_TYPE_LPDDR5) /* yr: mark until DV's code is ready */
+/* Used to keep track the total number of LP5 ACTimings */
+typedef enum
+{
+	//----------LPDDR5---------------------------
+	#if SUPPORT_LP5_DDR4800_ACTIM
+	//LP5_DDR4800 ACTiming---------------------------------
+	#if (ENABLE_WRITE_LECC == 1)
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR4800__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR4800__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR4800__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR4800__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR4800__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR4800__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#else //ENABLE_WRITE_LECC == 0
+
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR4800__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR4800__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR4800__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR4800__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR4800__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR4800__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#endif //ENABLE_WRITE_LECC
+
+	#endif// SUPPORT_LP5_DDR4800_ACTIM
+	#if SUPPORT_LP5_DDR5500_ACTIM
+	//LP5_DDR5500 ACTiming---------------------------------
+	#if (ENABLE_WRITE_LECC == 1)
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR5500__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR5500__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR5500__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR5500__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR5500__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR5500__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#else //ENABLE_WRITE_LECC == 0
+
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR5500__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR5500__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR5500__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR5500__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR5500__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR5500__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#endif //ENABLE_WRITE_LECC
+
+	#endif// SUPPORT_LP5_DDR5500_ACTIM
+	#if SUPPORT_LP5_DDR6000_ACTIM
+	//LP5_DDR6000 ACTiming---------------------------------
+	#if (ENABLE_WRITE_LECC == 1)
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR6000__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR6000__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR6000__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR6000__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR6000__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR6000__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#else //ENABLE_WRITE_LECC == 0
+
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR6000__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR6000__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR6000__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR6000__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR6000__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR6000__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#endif //ENABLE_WRITE_LECC
+
+	#endif// SUPPORT_LP5_DDR6000_ACTIM
+	#if SUPPORT_LP5_DDR6400_ACTIM
+	//LP5_DDR6400 ACTiming---------------------------------
+	#if (ENABLE_WRITE_LECC == 1)
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR6400__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR6400__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR6400__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR6400__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR6400__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR6400__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#else //ENABLE_WRITE_LECC == 0
+
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR6400__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR6400__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR6400__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR6400__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR6400__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR6400__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#endif //ENABLE_WRITE_LECC
+
+	#endif// SUPPORT_LP5_DDR6400_ACTIM
+	#if SUPPORT_LP5_DDR7500_ACTIM
+	//LP5_DDR7500 ACTiming---------------------------------
+	#if (ENABLE_WRITE_LECC == 1)
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR7500__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR7500__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR7500__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR7500__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR7500__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR7500__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#else //ENABLE_WRITE_LECC == 0
+
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR7500__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR7500__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR7500__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR7500__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR7500__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR7500__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#endif //ENABLE_WRITE_LECC
+
+	#endif// SUPPORT_LP5_DDR7500_ACTIM
+	#if SUPPORT_LP5_DDR8533_ACTIM
+	//LP5_DDR8533 ACTiming---------------------------------
+	#if (ENABLE_WRITE_LECC == 1)
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR8533__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR8533__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR8533__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR8533__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR8533__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR8533__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div16,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#else //ENABLE_WRITE_LECC == 0
+
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR8533__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR8533__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR8533__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR8533__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR8533__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	AC_TIME_LP5_NORMAL_DDR8533__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div16,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#endif //ENABLE_WRITE_LECC
+
+	#endif// SUPPORT_LP5_DDR8533_ACTIM
+	#if SUPPORT_LP5_DDR800_ACTIM
+	//LP5_DDR800 ACTiming---------------------------------
+	#if (ENABLE_DVFSC_LP5 == 1)
+	AC_TIME_LP5_BYTE_DDR800__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_ON_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR800__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_ON_Div8_CKR4,
+	#endif //ENABLE_DVFSC_LP5
+	AC_TIME_LP5_BYTE_DDR800__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR800__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+
+	#endif// SUPPORT_LP5_DDR800_ACTIM
+	#if SUPPORT_LP5_DDR1200_ACTIM && LP5_DDR1200_CKR //CKR4
+	#if (ENABLE_DVFSC_LP5 == 1)
+	AC_TIME_LP5_BYTE_DDR1200__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_ON_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR1200__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_ON_Div8_CKR4,
+	#endif //ENABLE_DVFSC_LP5
+	AC_TIME_LP5_BYTE_DDR1200__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR1200__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+
+	#endif// SUPPORT_LP5_DDR1200_ACTIM
+	#if SUPPORT_LP5_DDR1600_ACTIM && LP5_DDR1600_CKR //CKR4
+	#if (ENABLE_DVFSC_LP5 == 1)
+	AC_TIME_LP5_BYTE_DDR1600__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_ON_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR1600__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_ON_Div8_CKR4,
+	#endif //ENABLE_DVFSC_LP5
+	AC_TIME_LP5_BYTE_DDR1600__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR1600__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+
+	#endif// SUPPORT_LP5_DDR1600_ACTIM
+	#if SUPPORT_LP5_DDR1866_ACTIM && LP5_DDR1866_CKR //CKR4
+	AC_TIME_LP5_BYTE_DDR1866_RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_CKR4,
+    AC_TIME_LP5_NORM_DDR1866_RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_CKR4,
+
+	#endif// SUPPORT_LP5_DDR1866_ACTIM
+	#if SUPPORT_LP5_DDR2133_ACTIM && LP5_DDR2133_CKR //CKR4
+	AC_TIME_LP5_BYTE_DDR2133_RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_CKR4,
+	AC_TIME_LP5_NORM_DDR2133_RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_CKR4,
+
+	#endif// SUPPORT_LP5_DDR2133_ACTIM
+	#if SUPPORT_LP5_DDR2667_ACTIM && LP5_DDR2667_CKR //CKR4
+	AC_TIME_LP5_BYTE_DDR2667_RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_CKR4,
+	AC_TIME_LP5_NORM_DDR2667_RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_CKR4,
+
+	#endif// SUPPORT_LP5_DDR2667_ACTIM
+	#if SUPPORT_LP5_DDR3200_ACTIM && LP5_DDR3200_CKR //CKR4
+	AC_TIME_LP5_BYTE_DDR3200_RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_CKR4,
+	AC_TIME_LP5_NORM_DDR3200_RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_CKR4,
+
+	#endif// SUPPORT_LP5_DDR3200_ACTIM
+	#if SUPPORT_LP5_DDR3733_ACTIM
+	//LP5_DDR3733 ACTiming---------------------------------
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR3733__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR3733__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR3733__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR3733__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	#endif //ENABLE_READ_DBI
+
+	#endif// SUPPORT_LP5_DDR3733_ACTIM
+	#if SUPPORT_LP5_DDR4266_ACTIM
+	//LP5_DDR4266 ACTiming---------------------------------
+	#if (ENABLE_WRITE_LECC == 1)
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR4266__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR4266__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR4266__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR4266__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR4266__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR4266__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#else //ENABLE_WRITE_LECC == 0
+
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR4266__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR4266__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR4266__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR4266__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR4266__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR4266__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#endif //ENABLE_WRITE_LECC
+
+	#endif// SUPPORT_LP5_DDR4266_ACTIM
+	#if SUPPORT_LP5_DDR4800_ACTIM
+	//LP5_DDR4800 ACTiming---------------------------------
+	#if (ENABLE_WRITE_LECC == 1)
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR4800__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR4800__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR4800__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR4800__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR4800__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR4800__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#else //ENABLE_WRITE_LECC == 0
+
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR4800__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR4800__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR4800__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR4800__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR4800__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR4800__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#endif //ENABLE_WRITE_LECC
+
+	#endif// SUPPORT_LP5_DDR4800_ACTIM
+	#if SUPPORT_LP5_DDR5500_ACTIM
+	//LP5_DDR5500 ACTiming---------------------------------
+	#if (ENABLE_WRITE_LECC == 1)
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR5500__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR5500__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR5500__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR5500__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR5500__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR5500__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#else //ENABLE_WRITE_LECC == 0
+
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR5500__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR5500__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR5500__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR5500__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR5500__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR5500__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#endif //ENABLE_WRITE_LECC
+
+	#endif// SUPPORT_LP5_DDR5500_ACTIM
+	#if SUPPORT_LP5_DDR6400_ACTIM
+	//LP5_DDR6400 ACTiming---------------------------------
+	#if (ENABLE_WRITE_LECC == 1)
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR6400__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR6400__RDBI_OFF_RECC_ON_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR6400__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR6400__RDBI_ON_RECC_OFF_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR6400__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR6400__RDBI_OFF_RECC_OFF_WECC_ON_DVFSC_OFF_Div8_CKR4,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#else //ENABLE_WRITE_LECC == 0
+
+	#if (ENABLE_READ_LECC == 1)
+	AC_TIME_LP5_BYTE_DDR6400__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR6400__RDBI_OFF_RECC_ON_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	#else //ENABLE_READ_LECC == 0
+	#if (ENABLE_READ_DBI == 1)
+	AC_TIME_LP5_BYTE_DDR6400__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR6400__RDBI_ON_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	#else //ENABLE_READ_DBI == 0
+	AC_TIME_LP5_BYTE_DDR6400__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	AC_TIME_LP5_NORMAL_DDR6400__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR4,
+	#endif //ENABLE_READ_DBI
+	#endif //ENABLE_READ_LECC
+	#endif //ENABLE_WRITE_LECC
+
+	#endif// SUPPORT_LP5_DDR6400_ACTIM
+	#if SUPPORT_LP5_DDR1200_ACTIM && (!LP5_DDR1200_CKR)
+	#if (ENABLE_DVFSC_LP5 == 1)
+	AC_TIME_LP5_BYTE_DDR1200__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_ON_Div8_CKR2,
+	AC_TIME_LP5_NORMAL_DDR1200__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_ON_Div8_CKR2,
+	#endif //ENABLE_DVFSC_LP5
+	AC_TIME_LP5_BYTE_DDR1200__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR2,
+	AC_TIME_LP5_NORMAL_DDR1200__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR2,
+
+	#endif// SUPPORT_LP5_DDR1200_ACTIM
+	#if SUPPORT_LP5_DDR1600_ACTIM && (!LP5_DDR1600_CKR)
+	#if (ENABLE_DVFSC_LP5 == 1)
+	AC_TIME_LP5_BYTE_DDR1600__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_ON_Div8_CKR2,
+	AC_TIME_LP5_NORMAL_DDR1600__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_ON_Div8_CKR2,
+	#endif //ENABLE_DVFSC_LP5
+	AC_TIME_LP5_BYTE_DDR1600__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR2,
+	AC_TIME_LP5_NORMAL_DDR1600__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div8_CKR2,
+
+	#endif// SUPPORT_LP5_DDR1600_ACTIM
+	#if SUPPORT_LP5_DDR1866_ACTIM && (!LP5_DDR1866_CKR)
+	AC_TIME_LP5_BYTE_DDR1866_RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_CKR2,
+	AC_TIME_LP5_NORM_DDR1866_RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_CKR2,
+
+	#endif// SUPPORT_LP5_DDR1866_ACTIM
+	#if SUPPORT_LP5_DDR2133_ACTIM && (!LP5_DDR2133_CKR)
+	AC_TIME_LP5_BYTE_DDR2133_RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_CKR2,
+	AC_TIME_LP5_NORM_DDR2133_RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_CKR2,
+
+	#endif// SUPPORT_LP5_DDR2133_ACTIM
+	#if SUPPORT_LP5_DDR2400_ACTIM && (!LP5_DDR2400_CKR)
+	AC_TIME_LP5_BYTE_DDR2400_RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_CKR2,
+	AC_TIME_LP5_NORM_DDR2400_RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_CKR2,
+
+	#endif// SUPPORT_LP5_DDR2400_ACTIM
+	#if SUPPORT_LP5_DDR2667_ACTIM && (!LP5_DDR2667_CKR)
+	AC_TIME_LP5_BYTE_DDR2667_RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_CKR2,
+	AC_TIME_LP5_NORM_DDR2667_RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_CKR2,
+
+	#endif// SUPPORT_LP5_DDR2667_ACTIM
+	#if SUPPORT_LP5_DDR3200_ACTIM && (!LP5_DDR3200_CKR)
+	AC_TIME_LP5_BYTE_DDR3200_RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_CKR2,
+	AC_TIME_LP5_NORM_DDR3200_RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_CKR2,
+
+	#endif// SUPPORT_LP5_DDR3200_ACTIM
+	#if SUPPORT_LP5_DDR400_ACTIM
+	//LP5_DDR400 ACTiming---------------------------------
+	#if (ENABLE_DVFSC_LP5 == 1)
+	AC_TIME_LP5_BYTE_DDR400__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_ON_Div4,
+	AC_TIME_LP5_NORMAL_DDR400__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_ON_Div4,
+	#endif //ENABLE_DVFSC_LP5
+	AC_TIME_LP5_BYTE_DDR400__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div4,
+	AC_TIME_LP5_NORMAL_DDR400__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div4,
+
+	#endif// SUPPORT_LP5_DDR400_ACTIM
+	#if SUPPORT_LP5_DDR800_ACTIM
+	//LP5_DDR800 ACTiming---------------------------------
+	#if (ENABLE_DVFSC_LP5 == 1)
+	AC_TIME_LP5_BYTE_DDR800__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_ON_Div4,
+	AC_TIME_LP5_NORMAL_DDR800__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_ON_Div4,
+	#endif //ENABLE_DVFSC_LP5
+	AC_TIME_LP5_BYTE_DDR800__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div4,
+	AC_TIME_LP5_NORMAL_DDR800__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div4,
+
+	#endif// SUPPORT_LP5_DDR800_ACTIM
+	#if SUPPORT_LP5_DDR1600_ACTIM
+	//LP5_DDR1600 ACTiming---------------------------------
+	#if (ENABLE_DVFSC_LP5 == 1)
+	AC_TIME_LP5_BYTE_DDR1600__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_ON_Div4,
+	AC_TIME_LP5_NORMAL_DDR1600__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_ON_Div4,
+	#endif //ENABLE_DVFSC_LP5
+	AC_TIME_LP5_BYTE_DDR1600__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div4,
+	AC_TIME_LP5_NORMAL_DDR1600__RDBI_OFF_RECC_OFF_WECC_OFF_DVFSC_OFF_Div4,
+
+	#endif// SUPPORT_LP5_DDR1600_ACTIM
+	AC_TIMING_NUMBER_LP5_SA
+	} AC_TIMING_LP5_COUNT_TYPE_T;
+#endif
+
+#if FOR_DV_SIMULATION_USED
+#define AC_TIMING_NUMBER_LP5    800
+#endif
+#define AC_TIMING_NUMBER_DDR4   16 //cc: TO BE OPTIMIZED
+#define AC_TIMING_NUMBER_DDR3   10 //cc: TO BE OPTIMIZED
+/* ACTiming struct declaration (declared here due Fld_wid for each register type)
+ * Should include all fields from ACTiming excel file (And update the correct values in UpdateACTimingReg()
+ * Note: DQSINCTL, DATLAT aren't in ACTiming excel file (internal delay parameters)
+ */
+typedef struct _ACTime_T_LP4
+{
+    U8 dramType, cbtMode, readDBI;
+    U8 DivMode, index;
+    U16 freq;
+    U8 readLat, writeLat;
+    U8 dqsinctl, datlat; //DQSINCTL, DATLAT aren't in ACTiming excel file
+
+    U8 tras;
+    U8 trp;
+    U8 trpab;
+    U8 trc;
+#if FOR_DV_SIMULATION_USED
+    U8 trfc;
+    U8 trfcpb;
+    U16 txrefcnt;
+#endif
+    U8 txp;
+    U8 trtp;
+    U8 trcd;
+    U8 twr;
+    U8 twtr;
+    U8 tpbr2pbr;
+    U8 tpbr2act;
+    U8 tr2mrw;
+    U8 tw2mrw;
+    U8 tmrr2mrw;
+    U8 tmrw;
+    U8 tmrd;
+    U8 tmrwckel;
+    U8 tpde;
+    U8 tpdx;
+    U8 tmrri;
+    U8 trrd;
+    U8 trrd_4266;
+    U8 tfaw;
+    U8 tfaw_4266;
+    U8 trtw_odt_off;
+    U8 trtw_odt_on;
+    U8 tzqcs;
+    U8 xrtw2w_new_mode;
+    U8 xrtw2w_old_mode;
+    U8 xrtw2r_odt_on;
+    U8 xrtw2r_odt_off;
+    U8 xrtr2w_odt_on;
+    U8 xrtr2w_odt_off;
+    U8 xrtr2r_new_mode;
+    U8 xrtr2r_old_mode;
+    U8 tr2mrr;
+    U8 vrcgdis_prdcnt;
+    U8 hwset_mr2_op;
+    U8 hwset_mr13_op;
+    U8 hwset_vrcg_op;
+    U8 trcd_derate;
+    U8 trc_derate;
+    U8 tras_derate;
+    U8 trpab_derate;
+    U8 trp_derate;
+    U8 trrd_derate;
+    U8 trtpd;
+    U8 twtpd;
+    U8 tmrr2w_odt_off;
+    U8 tmrr2w_odt_on;
+    U8 ckeprd;
+    U8 ckelckcnt;
+    U8 zqlat2;
+    U8 trfmpb;
+
+    //DRAMC_REG_SHU_AC_TIME_05T ===================================
+    U8 tras_05T;
+    U8 trp_05T;
+    U8 trpab_05T;
+    U8 trc_05T;
+#if FOR_DV_SIMULATION_USED
+    U8 trfc_05T;
+    U8 trfcpb_05T;
+#endif
+    U8 txp_05T;
+    U8 trtp_05T;
+    U8 trcd_05T;
+    U8 twr_05T;
+    U8 twtr_05T;
+    U8 tpbr2pbr_05T;
+    U8 tpbr2act_05T;
+    U8 tr2mrw_05T;
+    U8 tw2mrw_05T;
+    U8 tmrr2mrw_05T;
+    U8 tmrw_05T;
+    U8 tmrd_05T;
+    U8 tmrwckel_05T;
+    U8 tpde_05T;
+    U8 tpdx_05T;
+    U8 tmrri_05T;
+    U8 trrd_05T;
+    U8 trrd_4266_05T;
+    U8 tfaw_05T;
+    U8 tfaw_4266_05T;
+    U8 trtw_odt_off_05T;
+    U8 trtw_odt_on_05T;
+    U8 trcd_derate_05T;
+    U8 trc_derate_05T;
+    U8 tras_derate_05T;
+    U8 trpab_derate_05T;
+    U8 trp_derate_05T;
+    U8 trrd_derate_05T;
+    U8 trtpd_05T;
+    U8 twtpd_05T;
+    U8 trfmpb_05T;
+
+} ACTime_T_LP4;
+
+typedef struct _ACTime_T_LP5
+{
+    U8 dramType, cbtMode, readDBI, DVFSC, NTODT, readECCLink, writeECCLink, SetAorB;
+    U8 DivMode, CKRMode;
+    U16 freq, index;
+    U8 readLat, writeLat;
+    U8 dqsinctl, datlat; //DQSINCTL, DATLAT aren't in ACTiming excel file
+
+    //DRAMC_REG_SHU_ACTIM0 ===================================
+    U8 trcd ;
+    U8 trrd ;
+    U8 twr  ;
+    U8 twtr ;
+    U8 twtr_l ;
+
+    //DRAMC_REG_SHU_ACTIM1 ===================================
+    U8 trc     ;
+    U8 tras    ;
+    U8 trp     ;
+    U8 tmrwckel;
+    U8 trpab   ;
+
+    //DRAMC_REG_SHU_ACTIM2 ===================================
+    U8 tfaw ;
+
+    U8 tr2w_odt_off;
+    U8 tr2w_odt_on ;
+
+    U8 trtp ;
+    U8 tmrri ;
+    U8 txp ;
+
+    //DRAMC_REG_SHU_ACTIM3 ===================================
+//    U16 refcnt :Fld_wid(SHU_ACTIM3_REFCNT);
+#if FOR_DV_SIMULATION_USED
+    U16 trfc ;
+    U16 trfcpb ;
+    U16 trfc_2gb ;
+    U16 trfcpb_2gb ;
+    U16 trfc_3gb ;
+    U16 trfcpb_3gb ;
+    U16 trfc_6gb ;
+    U16 trfcpb_6gb ;
+    U16 trfc_12gb ;
+    U16 trfcpb_12gb ;
+    U16 txrefcnt ;
+#endif
+
+    //DRAMC_REG_SHU_ACTIM4 ===================================
+    U8 tzqcs ;
+//    U16 refcnt_fr_clk :Fld_wid(SHU_ACTIM4_REFCNT_FR_CLK);
+
+    //DRAMC_REG_SHU_ACTIM5 ===================================
+    U8 tpbr2act ;
+    U8 tpbr2pbr ;
+//    U16 tmrr2w_ODT_off :Fld_wid(SHU_ACTIM5_TMRR2W);
+//    U16 tmrr2w_ODT_on :Fld_wid(SHU_ACTIM5_TMRR2W);
+    U8 twtpd ;
+    U8 trtpd ;
+
+    //DRAMC_REG_SHU_ACTIM5 ===================================
+    U8 tr2mrw ;
+    U8 tr2mrr ;
+    U8 tw2mrw ;
+    U8 tmrr2mrw ;
+    U8 tmrr2w ;
+//    U16 tmrr2mrw :Fld_wid(SHU_ACTIM6_TMRR2MRW);
+    U8 tmrw   ;
+    U8 tmrd   ;
+    U8 zqlat2 ;
+//    U16  ;
+    #if 0 //Currently not used
+    //DRAMC_REG_SHU_ACTIM6
+    U8 :Fld_wid(SHU_ACTIM6_BGTRRD);
+    U8 :Fld_wid(SHU_ACTIM6_TWRMPR);
+    U8 :Fld_wid(SHU_ACTIM6_BGTWTR);
+    U8 :Fld_wid(SHU_ACTIM6_BGTCCD);
+    #endif
+    //DRAMC_REG_SHU_ACTIM_XRT ===================================
+    U8 xrtw2w_odt_off ;
+    U8 xrtw2w_odt_on ;
+    U8 xrtw2r_odt_off_otf_off ;
+    U8 xrtw2r_odt_on_otf_off  ;
+    U8 xrtw2r_odt_off_otf_on ;
+    U8 xrtw2r_odt_on_otf_on  ;
+    U8 xrtr2w_odt_off ;
+    U8 xrtr2w_odt_on  ;
+    U8 xrtr2r_odt_off ;
+    U8 xrtr2r_odt_on  ;
+    U8 xrtw2w_odt_off_wck;
+    U8 xrtw2w_odt_on_wck ;
+    U8 xrtw2r_odt_off_wck;
+    U8 xrtw2r_odt_on_wck ;
+    U8 xrtr2w_odt_off_wck;
+    U8 xrtr2w_odt_on_wck ;
+    U8 xrtr2r_wck ;
+	//DRAMC_REG_SHU_CKECTRL ===================================
+    U8 tpdx ;
+    U8 tpde ;
+    U8 trfmpb ;
+    U8 trfmpb_05T;
+    U8 twtrap;
+    U8 twtrap_l;
+    U8 twtrap_05T;
+    U8 twtrap_l_05T;
+    U8 tmdy;
+    U8 nwr;
+    U8 nwr_05T;
+    U8 nrbtp;
+    U8 nrbtp_05T;
+
+    U8 wckrdoff;
+    U8 wckwroff;
+
+    U8 hwset_mr2_op  ;
+    U8 hwset_mr13_op ;
+    U8 hwset_vrcg_op ;
+    U8 vrcgdis_prdcnt;
+    U8 lp5_cmd1to2en ;
+    U8 tcsh_cscal    ;
+    U8 tcacsh        ;
+    U8 tcsh          ;
+    U8 trcd_derate   ;
+    U8 tras_derate   ;
+    U8 trp_derate    ;
+    U8 trpab_derate  ;
+    U8 trc_derate    ;
+    U8 trrd_derate   ;
+
+    //DRAMC_REG_SHU_AC_TIME_05T ===================================
+    #if 0 //Currently not used
+    U8 :Fld_wid(SHU_AC_TIME_05T_XRTW2R_M05T);
+    U8 :Fld_wid(SHU_AC_TIME_05T_XRTR2W_05T);
+    #endif
+    U8 twtr_05T         ;
+    U8 twtr_l_05T         ;
+    U8 tr2w_odt_off_05T ;
+    U8 tr2w_odt_on_05T  ;
+    #if 0 //Currently not used
+    U8 :Fld_wid(SHU_AC_TIME_05T_BGTWTR_05T);
+    U8 :Fld_wid(SHU_AC_TIME_05T_BGTCCD_05T);
+    U8 :Fld_wid(SHU_AC_TIME_05T_BGTRRD_05T);
+    #endif
+
+    U8 twtpd_05T ;
+    U8 trtpd_05T ;
+    U8 tfaw_05T  ;
+    U8 trrd_05T  ;
+    U8 twr_05T   ;
+    U8 tras_05T  ;
+    U8 trpab_05T ;
+    U8 trp_05T   ;
+    U8 trcd_05T  ;
+    U8 trtp_05T  ;
+    U8 txp_05T   ;
+#if (FOR_DV_SIMULATION_USED == 1)
+    U8 trfc_05T  ;
+    U8 trfc_2gb_05T  ;
+    U8 trfc_3gb_05T  ;
+    U8 trfc_6gb_05T  ;
+    U8 trfc_12gb_05T  ;
+    U8 trfcpb_05T;
+    U8 trfcpb_2gb_05T;
+    U8 trfcpb_3gb_05T;
+    U8 trfcpb_6gb_05T;
+    U8 trfcpb_12gb_05T;
+#endif
+    U8 trc_05T   ;
+    U8 tpdx_05T  ;
+    U8 tpde_05T  ;
+    U8 tmrwckel_05T ;
+    U8 tmrri_05T    ;
+    U8 tpbr2act_05T ;
+    U8 tpbr2pbr_05T ;
+    U8 tr2mrw_05T   ;
+    U8 tw2mrw_05T   ;
+    U8 tmrr2mrw_05T ;
+    U8 tmrw_05T     ;
+    U8 tmrd_05T     ;
+    U8 wckrdoff_05T ;
+    U8 wckwroff_05T ;
+
+    //Other ACTiming reg fields ===================================
+    U8 r_dmcatrain_intv ;
+    U8 r_dmmrw_intv     ;
+    U8 r_dmfspchg_prdcnt;
+    U8 ckeprd           ;
+    U8 ckelckcnt        ;
+    U8 trcd_derate_05T  ;
+    U8 tras_derate_05T  ;
+    U8 trp_derate_05T   ;
+    U8 trpab_derate_05T ;
+    U8 trc_derate_05T   ;
+    U8 trrd_derate_05T  ;
+
+} ACTime_T_LP5;
+
+typedef struct _ACTime_T_DDR3
+{
+    U8 dramType, cbtMode, readDBI, DVFSC, NTODT, readECCLink, writeECCLink;
+    U8 DivMode;
+    U16 freq;
+    U8 readLat, writeLat;
+    U8 dqsinctl, datlat; //DQSINCTL, DATLAT aren't in ACTiming excel file
+
+    //DRAMC_REG_SHU_ACTIM0 ===================================
+    U16 trcd ;
+    U16 trrd ;
+    U16 twr  ;
+    U16 twtr ;
+    U16 twtr_l ;
+
+    //DRAMC_REG_SHU_ACTIM1 ===================================
+    U16 trc     ;
+    U16 tras    ;
+    U16 trp     ;
+    U16 tmrwckel;
+    U16 trpab   ;
+
+    //DRAMC_REG_SHU_ACTIM2 ===================================
+    U16 tfaw ;
+
+    U16 tr2w_odt_off;
+    U16 tr2w_odt_on ;
+
+    U16 trtp ;
+    U16 tmrri ;
+    U16 txp ;
+
+    //DRAMC_REG_SHU_ACTIM3 ===================================
+//    U16 refcnt :Fld_wid(SHU_ACTIM3_REFCNT);
+    U16 trfc ;
+    U16 trfcpb ;
+
+    //DRAMC_REG_SHU_ACTIM4 ===================================
+    U16 tzqcs ;
+//    U16 refcnt_fr_clk :Fld_wid(SHU_ACTIM4_REFCNT_FR_CLK);
+    U16 bgtccd ;
+    U16 txrefcnt ;
+
+    //DRAMC_REG_SHU_ACTIM5 ===================================
+    U16 tpbr2act ;
+    U16 tpbr2pbr ;
+//    U16 tmrr2w_ODT_off :Fld_wid(SHU_ACTIM5_TMRR2W);
+//    U16 tmrr2w_ODT_on :Fld_wid(SHU_ACTIM5_TMRR2W);
+    U16 twtpd ;
+    U16 trtpd ;
+
+    //DRAMC_REG_SHU_ACTIM5 ===================================
+    U16 tr2mrw ;
+    U16 tr2mrr ;
+    U16 tw2mrw ;
+    U16 tmrr2mrw ;
+    U16 tmrr2w ;
+//    U16 tmrr2mrw :Fld_wid(SHU_ACTIM6_TMRR2MRW);
+    U16 tmrw   ;
+    U16 tmrd   ;
+    U16 zqlat2 ;
+//    U16  ;
+
+    #if 0 //Currently not used
+    //DRAMC_REG_SHU_ACTIM6
+    U16 :Fld_wid(SHU_ACTIM6_BGTRRD);
+    U16 :Fld_wid(SHU_ACTIM6_TWRMPR);
+    U16 :Fld_wid(SHU_ACTIM6_BGTWTR);
+    U16 :Fld_wid(SHU_ACTIM6_BGTCCD);
+    #endif
+    //DRAMC_REG_SHU_ACTIM_XRT ===================================
+    U16 xrtw2w_odt_off ;
+    U16 xrtw2w_odt_on ;
+    U16 xrtw2r_odt_off_otf_off ;
+    U16 xrtw2r_odt_on_otf_off  ;
+    U16 xrtw2r_odt_off_otf_on ;
+    U16 xrtw2r_odt_on_otf_on  ;
+    U16 xrtr2w_odt_off ;
+    U16 xrtr2w_odt_on  ;
+    U16 xrtr2r_odt_off ;
+    U16 xrtr2r_odt_on  ;
+    U16 xrtw2w_odt_off_wck;
+    U16 xrtw2w_odt_on_wck ;
+    U16 xrtw2r_odt_off_wck;
+    U16 xrtw2r_odt_on_wck ;
+    U16 xrtr2w_odt_off_wck;
+    U16 xrtr2w_odt_on_wck ;
+    U16 xrtr2r_wck ;
+
+    //Robert for DDR3 merge into IPM modified -- 20200514 -- mengru
+    U16 xrtw2w_new_mode ;
+    U16 xrtw2w_old_mode ;
+    U16 xrtw2r_odt_on   ; 
+    U16 xrtw2r_odt_off  ;
+    U16 xrtr2r_new_mode ;
+    U16 xrtr2r_old_mode ;
+
+	//DRAMC_REG_SHU_CKECTRL ===================================
+    U16 tpdx ;
+    U16 tpde ;
+    U16 trfmpb ;
+    U16 trfmpb_05T;
+    U16 twtrap;
+    U16 twtrap_l;
+    U16 twtrap_05T;
+    U16 twtrap_l_05T;
+    U16 tmdy;
+    U16 nwr;
+    U16 nwr_05T;
+    U16 nrbtp;
+    U16 nrbtp_05T;
+
+    U16 wckrdoff;
+    U16 wckwroff;
+
+    U16 hwset_mr2_op  ;
+    U16 hwset_mr13_op ;
+    U16 hwset_vrcg_op ;
+    U16 vrcgdis_prdcnt;
+    U16 lp5_cmd1to2en ;
+    U16 tcsh_cscal    ;
+    U16 tcacsh        ;
+    U16 tcsh          ;
+    U16 trcd_derate   ;
+    U16 tras_derate   ;
+    U16 trp_derate    ;
+    U16 trpab_derate  ;
+    U16 trc_derate    ;
+    U16 trrd_derate   ;
+
+    //DRAMC_REG_SHU_AC_TIME_05T ===================================
+    #if 0 //Currently not used
+    U16 :Fld_wid(SHU_AC_TIME_05T_XRTW2R_M05T);
+    U16 :Fld_wid(SHU_AC_TIME_05T_XRTR2W_05T);
+    #endif
+    U16 twtr_05T         ;
+    U16 twtr_l_05T         ;
+    U16 tr2w_odt_off_05T ;
+    U16 tr2w_odt_on_05T  ;
+    #if 0 //Currently not used
+    U16 :Fld_wid(SHU_AC_TIME_05T_BGTWTR_05T);
+    U16 :Fld_wid(SHU_AC_TIME_05T_BGTCCD_05T);
+    U16 :Fld_wid(SHU_AC_TIME_05T_BGTRRD_05T);
+    #endif
+
+    U16 twtpd_05T ;
+    U16 trtpd_05T ;
+    U16 tfaw_05T  ;
+    U16 trrd_05T  ;
+    U16 twr_05T   ;
+    U16 tras_05T  ;
+    U16 trpab_05T ;
+    U16 trp_05T   ;
+    U16 trcd_05T  ;
+    U16 trtp_05T  ;
+    U16 txp_05T   ;
+    U16 trfc_05T  ;
+    U16 trfcpb_05T;
+    U16 trc_05T   ;
+    U16 tpdx_05T  ;
+    U16 tpde_05T  ;
+    U16 tmrwckel_05T ;
+    U16 tmrri_05T    ;
+    U16 tpbr2act_05T ;
+    U16 tpbr2pbr_05T ;
+    U16 tr2mrw_05T   ;
+    U16 tw2mrw_05T   ;
+    U16 tmrr2mrw_05T ;
+    U16 tmrw_05T     ;
+    U16 tmrd_05T     ;
+    U16 wckrdoff_05T ;
+    U16 wckwroff_05T ;
+
+    //Other ACTiming reg fields ===================================
+    U16 r_dmcatrain_intv ;
+    U16 r_dmmrw_intv     ;
+    U16 r_dmfspchg_prdcnt;
+    U16 ckeprd           ;
+    U16 ckelckcnt        ;
+    U16 trcd_derate_05T  ;
+    U16 tras_derate_05T  ;
+    U16 trp_derate_05T   ;
+    U16 trpab_derate_05T ;
+    U16 trc_derate_05T   ;
+    U16 trrd_derate_05T  ;
+
+} ACTime_T_DDR3;
+
+typedef struct _ACTime_T_DDR4
+{
+    U8 dramType, cbtMode, readDBI, DVFSC, NTODT, readECCLink, writeECCLink;
+    U8 DivMode;
+    U16 freq;
+    U8 readLat, writeLat;
+    U8 dqsinctl, datlat; //DQSINCTL, DATLAT aren't in ACTiming excel file
+
+    //DRAMC_REG_SHU_ACTIM0 ===================================
+    U16 trcd ;
+    U16 trrd ;
+    U16 trrd_l;
+    U16 tccd_l;
+    U16 twr  ;
+    U16 twtr ;
+    U16 twtr_l ;
+
+    //DRAMC_REG_SHU_ACTIM1 ===================================
+    U16 trc     ;
+    U16 tras    ;
+    U16 trp     ;
+    U16 tmrwckel;
+    U16 trpab   ;
+
+    //DRAMC_REG_SHU_ACTIM2 ===================================
+    U16 tfaw ;
+
+    U16 tr2w_odt_off;
+    U16 tr2w_odt_on ;
+
+    U16 trtp ;
+    U16 tmrri ;
+    U16 txp ;
+
+    //DRAMC_REG_SHU_ACTIM3 ===================================
+//    U16 refcnt :Fld_wid(SHU_ACTIM3_REFCNT);
+    U16 trfc ;
+    U16 trfcpb ;
+
+    //DRAMC_REG_SHU_ACTIM4 ===================================
+    U16 tzqcs ;
+//    U16 refcnt_fr_clk :Fld_wid(SHU_ACTIM4_REFCNT_FR_CLK);
+    U16 bgtccd ;
+    U16 txrefcnt ;
+
+    //DRAMC_REG_SHU_ACTIM5 ===================================
+    U16 tpbr2act ;
+    U16 tpbr2pbr ;
+//    U16 tmrr2w_ODT_off :Fld_wid(SHU_ACTIM5_TMRR2W);
+//    U16 tmrr2w_ODT_on :Fld_wid(SHU_ACTIM5_TMRR2W);
+    U16 twtpd ;
+    U16 trtpd ;
+
+    //DRAMC_REG_SHU_ACTIM5 ===================================
+    U16 tr2mrw ;
+    U16 tr2mrr ;
+    U16 tw2mrw ;
+    U16 tmrr2mrw ;
+    U16 tmrr2w ;
+//    U16 tmrr2mrw :Fld_wid(SHU_ACTIM6_TMRR2MRW);
+    U16 tmrw   ;
+    U16 tmrd   ;
+    U16 zqlat2 ;
+//    U16  ;
+
+    #if 0 //Currently not used
+    //DRAMC_REG_SHU_ACTIM6
+    U16 :Fld_wid(SHU_ACTIM6_BGTRRD);
+    U16 :Fld_wid(SHU_ACTIM6_TWRMPR);
+    U16 :Fld_wid(SHU_ACTIM6_BGTWTR);
+    U16 :Fld_wid(SHU_ACTIM6_BGTCCD);
+    #endif
+    //DRAMC_REG_SHU_ACTIM_XRT ===================================
+    U16 xrtw2w_odt_off ;
+    U16 xrtw2w_odt_on ;
+    U16 xrtw2r_odt_off_otf_off ;
+    U16 xrtw2r_odt_on_otf_off  ;
+    U16 xrtw2r_odt_off_otf_on ;
+    U16 xrtw2r_odt_on_otf_on  ;
+    U16 xrtr2w_odt_off ;
+    U16 xrtr2w_odt_on  ;
+    U16 xrtr2r_odt_off ;
+    U16 xrtr2r_odt_on  ;
+    U16 xrtw2w_odt_off_wck;
+    U16 xrtw2w_odt_on_wck ;
+    U16 xrtw2r_odt_off_wck;
+    U16 xrtw2r_odt_on_wck ;
+    U16 xrtr2w_odt_off_wck;
+    U16 xrtr2w_odt_on_wck ;
+    U16 xrtr2r_wck ;
+
+    //Robert for DDR4 merge into IPM modified -- 20200602 -- june
+    U16 xrtw2w_new_mode ;
+    U16 xrtw2w_old_mode ;
+    U16 xrtw2r_odt_on   ; 
+    U16 xrtw2r_odt_off  ;
+    U16 xrtr2r_new_mode ;
+    U16 xrtr2r_old_mode ;
+	//DRAMC_REG_SHU_CKECTRL ===================================
+    U16 tpdx ;
+    U16 tpde ;
+    U16 trfmpb ;
+    U16 trfmpb_05T;
+    U16 twtrap;
+    U16 twtrap_l;
+    U16 twtrap_05T;
+    U16 twtrap_l_05T;
+    U16 tmdy;
+    U16 nwr;
+    U16 nwr_05T;
+    U16 nrbtp;
+    U16 nrbtp_05T;
+
+    U16 wckrdoff;
+    U16 wckwroff;
+
+    U16 hwset_mr2_op  ;
+    U16 hwset_mr13_op ;
+    U16 hwset_vrcg_op ;
+    U16 vrcgdis_prdcnt;
+    U16 lp5_cmd1to2en ;
+    U16 tcsh_cscal    ;
+    U16 tcacsh        ;
+    U16 tcsh          ;
+    U16 trcd_derate   ;
+    U16 tras_derate   ;
+    U16 trp_derate    ;
+    U16 trpab_derate  ;
+    U16 trc_derate    ;
+    U16 trrd_derate   ;
+
+    //DRAMC_REG_SHU_AC_TIME_05T ===================================
+    #if 0 //Currently not used
+    U16 :Fld_wid(SHU_AC_TIME_05T_XRTW2R_M05T);
+    U16 :Fld_wid(SHU_AC_TIME_05T_XRTR2W_05T);
+    #endif
+    U16 twtr_05T         ;
+    U16 twtr_l_05T         ;
+    U16 tr2w_odt_off_05T ;
+    U16 tr2w_odt_on_05T  ;
+    #if 0 //Currently not used
+    U16 :Fld_wid(SHU_AC_TIME_05T_BGTWTR_05T);
+    U16 :Fld_wid(SHU_AC_TIME_05T_BGTCCD_05T);
+    U16 :Fld_wid(SHU_AC_TIME_05T_BGTRRD_05T);
+    #endif
+
+    U16 twtpd_05T ;
+    U16 trtpd_05T ;
+    U16 tfaw_05T  ;
+    U16 trrd_05T  ;
+    U16 trrd_l_05T  ;
+    U16 tccd_l_05T  ;
+    U16 twr_05T   ;
+    U16 tras_05T  ;
+    U16 trpab_05T ;
+    U16 trp_05T   ;
+    U16 trcd_05T  ;
+    U16 trtp_05T  ;
+    U16 txp_05T   ;
+    U16 trfc_05T  ;
+    U16 trfcpb_05T;
+    U16 trc_05T   ;
+    U16 tpdx_05T  ;
+    U16 tpde_05T  ;
+    U16 tmrwckel_05T ;
+    U16 tmrri_05T    ;
+    U16 tpbr2act_05T ;
+    U16 tpbr2pbr_05T ;
+    U16 tr2mrw_05T   ;
+    U16 tw2mrw_05T   ;
+    U16 tmrr2mrw_05T ;
+    U16 tmrw_05T     ;
+    U16 tmrd_05T     ;
+    U16 wckrdoff_05T ;
+    U16 wckwroff_05T ;
+
+    //Other ACTiming reg fields ===================================
+    U16 r_dmcatrain_intv ;
+    U16 r_dmmrw_intv     ;
+    U16 r_dmfspchg_prdcnt;
+    U16 ckeprd           ;
+    U16 ckelckcnt        ;
+    U16 trcd_derate_05T  ;
+    U16 tras_derate_05T  ;
+    U16 trp_derate_05T   ;
+    U16 trpab_derate_05T ;
+    U16 trc_derate_05T   ;
+    U16 trrd_derate_05T  ;
+
+} ACTime_T_DDR4;
+
+
+typedef struct
+{
+	U16 freq;
+	U8 DivMode, CKRMode;
+
+	U16 trfc;
+	U8 trfcpb;
+	U16 trfc_2gb;
+	U8 trfcpb_2gb;
+	U16 trfc_3gb;
+	U8 trfcpb_3gb;
+	U16 trfc_6gb;
+	U8 trfcpb_6gb;
+	U16 trfc_12gb;
+	U8 trfcpb_12gb;
+	U8 trfc_05T;
+	U8 trfc_2gb_05T;
+	U8 trfc_3gb_05T;
+	U8 trfc_6gb_05T;
+	U8 trfc_12gb_05T;
+	U8 trfcpb_05T;
+	U8 trfcpb_2gb_05T;
+	U8 trfcpb_3gb_05T;
+	U8 trfcpb_6gb_05T;
+	U8 trfcpb_12gb_05T;
+	U16 txrefcnt;
+	U16 txrefcnt_2gb;
+	U16 txrefcnt_3gb;
+	U16 txrefcnt_6gb;
+	U16 txrefcnt_12gb;
+} optimizeACTime;
+
+//ACTimingTbl[] forward declaration
+#if FOR_DV_SIMULATION_USED
+extern const ACTime_T_LP4 ACTimingTbl_LP4[AC_TIMING_NUMBER_LP4];
+extern const ACTime_T_LP5 ACTimingTbl_LP5[AC_TIMING_NUMBER_LP5];
+#endif
+extern const ACTime_T_LP4 ACTimingTbl_LP4_SA[AC_TIMING_NUMBER_LP4];
+extern const ACTime_T_LP5 ACTimingTbl_LP5_SA[AC_TIMING_NUMBER_LP5_SA];
+extern const optimizeACTime tRFCab_Opt_LP5[AC_TIMING_NUMBER_LP5_SA>>1];
+extern const optimizeACTime tRFCab_Opt_LP4[AC_TIMING_NUMBER_LP4>>1];
+extern const ACTime_T_DDR3 ACTimingTbl_DDR3[AC_TIMING_NUMBER_DDR3];
+extern const ACTime_T_DDR4 ACTimingTbl_DDR4[AC_TIMING_NUMBER_DDR4];
+
+extern U8 vDramcACTimingGetDatLat(DRAMC_CTX_T *p);
+extern DRAM_STATUS_T DdrUpdateACTiming(DRAMC_CTX_T *p);
+extern void vDramcACTimingOptimize(DRAMC_CTX_T *p);
+extern void vDramcACTimingEnlargeForWCKDiff(DRAMC_CTX_T * p);
+extern U32 u1GetACTimingIdx_lp5(DRAMC_CTX_T *p, int dramc_dram_ratio, int CKR_ratio, int frequency);
+extern U8 u1GetACTimingIdx_ddr3(DRAMC_CTX_T *p, int dramc_dram_ratio, int frequency);
+extern U8 u1GetACTimingIdx_ddr4(DRAMC_CTX_T *p, int dramc_dram_ratio, int frequency);
+
+#endif

@@ -1,0 +1,429 @@
+/* Copyright Statement:
+*
+* This software/firmware and related documentation ("MediaTek Software") are
+* protected under relevant copyright laws. The information contained herein
+* is confidential and proprietary to MediaTek Inc. and/or its licensors.
+* Without the prior written permission of MediaTek inc. and/or its licensors,
+* any reproduction, modification, use or disclosure of MediaTek Software,
+* and information contained herein, in whole or in part, shall be strictly prohibited.
+*/
+/* MediaTek Inc. (C) 2021. All rights reserved.
+*
+* BY OPENING THIS FILE, RECEIVER HEREBY UNEQUIVOCALLY ACKNOWLEDGES AND AGREES
+* THAT THE SOFTWARE/FIRMWARE AND ITS DOCUMENTATIONS ("MEDIATEK SOFTWARE")
+* RECEIVED FROM MEDIATEK AND/OR ITS REPRESENTATIVES ARE PROVIDED TO RECEIVER ON
+* AN "AS-IS" BASIS ONLY. MEDIATEK EXPRESSLY DISCLAIMS ANY AND ALL WARRANTIES,
+* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE IMPLIED WARRANTIES OF
+* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE OR NONINFRINGEMENT.
+* NEITHER DOES MEDIATEK PROVIDE ANY WARRANTY WHATSOEVER WITH RESPECT TO THE
+* SOFTWARE OF ANY THIRD PARTY WHICH MAY BE USED BY, INCORPORATED IN, OR
+* SUPPLIED WITH THE MEDIATEK SOFTWARE, AND RECEIVER AGREES TO LOOK ONLY TO SUCH
+* THIRD PARTY FOR ANY WARRANTY CLAIM RELATING THERETO. RECEIVER EXPRESSLY ACKNOWLEDGES
+* THAT IT IS RECEIVER'S SOLE RESPONSIBILITY TO OBTAIN FROM ANY THIRD PARTY ALL PROPER LICENSES
+* CONTAINED IN MEDIATEK SOFTWARE. MEDIATEK SHALL ALSO NOT BE RESPONSIBLE FOR ANY MEDIATEK
+* SOFTWARE RELEASES MADE TO RECEIVER'S SPECIFICATION OR TO CONFORM TO A PARTICULAR
+* STANDARD OR OPEN FORUM. RECEIVER'S SOLE AND EXCLUSIVE REMEDY AND MEDIATEK'S ENTIRE AND
+* CUMULATIVE LIABILITY WITH RESPECT TO THE MEDIATEK SOFTWARE RELEASED HEREUNDER WILL BE,
+* AT MEDIATEK'S OPTION, TO REVISE OR REPLACE THE MEDIATEK SOFTWARE AT ISSUE,
+* OR REFUND ANY SOFTWARE LICENSE FEES OR SERVICE CHARGE PAID BY RECEIVER TO
+* MEDIATEK FOR SUCH MEDIATEK SOFTWARE AT ISSUE.
+*/
+
+/**
+* @file    srclken_rc.h
+* @brief   Driver for srclken_rc control
+*
+*/
+
+#ifndef _SRCLKEN_RC_H_
+#define _SRCLKEN_RC_H_
+
+/***********************************************************************************
+** Definitions
+************************************************************************************/
+
+/* TODO: mark this after driver is ready */
+#define MTK_SRCLKEN_RC_BRINGUP
+
+#if !defined(MTK_SRCLKEN_RC_BRINGUP)
+#define MTK_SRCLKEN_RC_SUPPORT
+#define SRCLKEN_DBG				(1)
+#define SRCLKEN_RC_BROADCAST			(1)
+#define SRCLKEN_RC_MULTI_CMD			(0)
+#endif /* !defined(MTK_SRCLKEN_RC_BRINGUP) */
+
+#define RC_BASE					(0x1C00D000)
+#define RC_STATE_BASE				(0x1C00D100)
+
+#if !defined(PMIF_SPMI_P_BASE)
+#define PMIF_SPMI_P_BASE			(0x1C014000)
+#endif /* !defined(PMIF_SPMI_P_BASE) */
+
+/* PMIF Register*/
+#define PMIFSPMI_INF_EN				(PMIF_SPMI_BASE + 0x0024)
+#define PMIFSPMI_INF_EN_SRCLKEN_RC_HW_MSK	0x1
+#define PMIFSPMI_INF_EN_SRCLKEN_RC_HW_SHFT	4
+
+#define PMIFSPMI_OTHER_INF_EN			(PMIF_SPMI_BASE + 0x0028)
+#define OTHER_INF_DCXO0_EN_MSK			0x1
+#define OTHER_INF_DCXO0_EN_SHFT			0
+#define OTHER_INF_DCXO1_EN_MSK			0x1
+#define OTHER_INF_DCXO1_EN_SHFT			1
+
+#define PMIFSPMI_DCXO_CMD_ADDR0			(PMIF_SPMI_BASE + 0x005C)
+#define DCXO_CMD_ADDR0_0_MSK			0xffff
+#define DCXO_CMD_ADDR0_0_SHFT			0
+#define DCXO_CMD_ADDR0_1_MSK			0xffff
+#define DCXO_CMD_ADDR0_1_SHFT			16
+
+#define PMIFSPMI_DCXO_CMD_WDATA0		(PMIF_SPMI_BASE + 0x0060)
+#define DCXO_CMD_WDATA0_0_MSK			0xffff
+#define DCXO_CMD_WDATA0_0_SHFT			0
+#define DCXO_CMD_WDATA0_1_MSK			0xffff
+#define DCXO_CMD_WDATA0_1_SHFT			16
+
+#define PMIFSPMI_DCXO_CMD_ADDR1			(PMIF_SPMI_BASE + 0x0064)
+#define DCXO_CMD_ADDR1_0_MSK			0xffff
+#define DCXO_CMD_ADDR1_0_SHFT			0
+#define DCXO_CMD_ADDR1_1_MSK			0xffff
+#define DCXO_CMD_ADDR1_1_SHFT			16
+
+#define PMIFSPMI_DCXO_CMD_WDATA1		(PMIF_SPMI_BASE + 0x0068)
+#define DCXO_CMD_WDATA1_0_MSK			0xffff
+#define DCXO_CMD_WDATA1_0_SHFT			0
+#define DCXO_CMD_WDATA1_1_MSK			0xffff
+#define DCXO_CMD_WDATA1_1_SHFT			16
+
+#define PMIFSPMI_ARB_EN				(PMIF_SPMI_BASE + 0x0150)
+#define PMIFSPMI_ARB_EN_SRCLKEN_RC_HW_MSK	0x1
+#define PMIFSPMI_ARB_EN_SRCLKEN_RC_HW_SHFT	4
+#define PMIFSPMI_ARB_EN_DCXO_CONN_MSK		0x1
+#define PMIFSPMI_ARB_EN_DCXO_CONN_SHFT		17
+#define PMIFSPMI_ARB_EN_DCXO_NFC_MSK		0x1
+#define PMIFSPMI_ARB_EN_DCXO_NFC_SHFT		18
+
+#define PMIFSPMI_SLEEP_PROTECTION_CRL		(PMIF_SPMI_BASE + 0x03F0)
+#define PMIFSPMI_SPM_SLEEP_REQ_SEL_MSK		0x3
+#define PMIFSPMI_SPM_SLEEP_REQ_SEL_SHFT		0
+#define PMIFSPMI_SCP_SLEEP_REQ_SEL_MSK		0x3
+#define PMIFSPMI_SCP_SLEEP_REQ_SEL_SHFT		9
+
+#define PMIFSPMI_MODE_CRL			(PMIF_SPMI_BASE + 0x0408)
+#define PMIFSPMI_MD_CTL_PMIF_RDY_MSK		0x1
+#define PMIFSPMI_MD_CTL_PMIF_RDY_SHFT		9
+#define PMIFSPMI_MD_CTL_SRCLK_EN_MSK		0x1
+#define PMIFSPMI_MD_CTL_SRCLK_EN_SHFT		10
+#define PMIFSPMI_MD_CTL_SRVOL_EN_MSK		0x1
+#define PMIFSPMI_MD_CTL_SRVOL_EN_SHFT		11
+
+#define PMIFSPMI2_SLEEP_PROTECTION_CRL		(PMIF_SPMI_P_BASE + 0x03F0)
+#define PMIFSPMI2_SPM_SLEEP_REQ_SEL_MSK		0x3
+#define PMIFSPMI2_SPM_SLEEP_REQ_SEL_SHFT	0
+#define PMIFSPMI2_SCP_SLEEP_REQ_SEL_MSK		0x3
+#define PMIFSPMI2_SCP_SLEEP_REQ_SEL_SHFT	9
+
+#define PMIFSPMI2_MODE_CRL			(PMIF_SPMI_P_BASE + 0x0408)
+#define PMIFSPMI2_MD_CTL_PMIF_RDY_MSK		0x1
+#define PMIFSPMI2_MD_CTL_PMIF_RDY_SHFT		9
+#define PMIFSPMI2_MD_CTL_SRCLK_EN_MSK		0x1
+#define PMIFSPMI2_MD_CTL_SRCLK_EN_SHFT		10
+#define PMIFSPMI2_MD_CTL_SRVOL_EN_MSK		0x1
+#define PMIFSPMI2_MD_CTL_SRVOL_EN_SHFT		11
+
+/* SRCLKEN_RC Regsiter */
+#define SRCLKEN_RC_CFG				(RC_BASE + 0x0000)
+#define SW_RESET_MSK				0x1
+#define SW_RESET_SHFT				0
+#define CG_32K_EN_MSK				0x1
+#define CG_32K_EN_SHFT				1
+#define CG_FCLK_EN_MSK				0x1
+#define CG_FCLK_EN_SHFT				2
+#define CG_FCLK_FR_EN_MSK			0x1
+#define CG_FCLK_FR_EN_SHFT			3
+#define MUX_FCLK_FR_MSK				0x1
+#define MUX_FCLK_FR_SHFT			4
+#define RC_32K_DCM_MSK				0x1
+#define RC_32K_DCM_SHFT				8
+
+#define RC_CENTRAL_CFG1				(RC_BASE + 0x0004)
+#define SRCLKEN_RC_EN_MSK			0x1
+#define SRCLKEN_RC_EN_SHFT			0
+#define RCEN_ISSUE_M_MSK			0x1
+#define RCEN_ISSUE_M_SHFT			1
+#define RC_SPI_ACTIVE_MSK			0x1
+#define RC_SPI_ACTIVE_SHFT			2
+#define SRCLKEN_RC_EN_SEL_MSK			0x1
+#define SRCLKEN_RC_EN_SEL_SHFT			3
+#define VCORE_SETTLE_T_MSK			0x7
+#define VCORE_SETTLE_T_SHFT			5
+#define ULPOSC_SETTLE_T_MSK			0xf
+#define ULPOSC_SETTLE_T_SHFT			8
+#define NON_DCXO_SETTLE_T_MSK			0x3ff
+#define NON_DCXO_SETTLE_T_SHFT			12
+#define DCXO_SETTLE_T_MSK			0x3ff
+#define DCXO_SETTLE_T_SHFT			22
+
+#define RC_CENTRAL_CFG2				(RC_BASE + 0x0008)
+#define SRCVOLTEN_CTRL_MSK			0xf
+#define SRCVOLTEN_CTRL_SHFT			0
+#define VREQ_CTRL_MSK				0xf
+#define VREQ_CTRL_SHFT				4
+#define SRCVOLTEN_VREQ_SEL_MSK			0x1
+#define SRCVOLTEN_VREQ_SEL_SHFT			8
+#define SRCVOLTEN_VREQ_M_MSK			0x1
+#define SRCVOLTEN_VREQ_M_SHFT			9
+#define FORCE_SRCVOLTEN_OFF_MSK			0x1
+#define FORCE_SRCVOLTEN_OFF_SHFT		10
+#define FORCE_SRCVOLTEN_ON_MSK			0x1
+#define FORCE_SRCVOLTEN_ON_SHFT			11
+#define ULPOSC_CTRL_M_MSK			0xf
+#define ULPOSC_CTRL_M_SHFT			12
+#define FORCE_VCORE_RDY_MSK			0x1
+#define FORCE_VCORE_RDY_SHFT			16
+#define FORCE_ULPOSC2ON_MSK			0x1
+#define FORCE_ULPOSC2ON_SHFT			17
+#define FORCE_ULPOSC_CLK_EN_MSK			0x1
+#define FORCE_ULPOSC_CLK_EN_SHFT		18
+#define FORCE_ULPOSC_ON_MSK			0x1
+#define FORCE_ULPOSC_ON_SHFT			19
+#define DIS_ULPOSC_RDY_CHK_MSK			0x1
+#define DIS_ULPOSC_RDY_CHK_SHFT			20
+#define PWRAP_SLP_CTRL_M_MSK			0xf
+#define PWRAP_SLP_CTRL_M_SHFT			21
+#define PWRAP_SLP_MUX_SEL_MSK			0x1
+#define PWRAP_SLP_MUX_SEL_SHFT			25
+#define FORCE_PWRAP_ON_MSK			0x1
+#define FORCE_PWRAP_ON_SHFT			26
+#define FORCE_PWRAP_AWK_MSK			0x1
+#define FORCE_PWRAP_AWK_SHFT			27
+#define NON_DCXO_REQ_FORCEON_MSK		0x1
+#define NON_DCXO_REQ_FORCEON_SHFT		28
+#define NON_DCXO_REQ_FORCEOFF_MSK		0x1
+#define NON_DCXO_REQ_FORCEOFF_SHFT		29
+#define DCXO_REQ_FORCEON_MSK			0x1
+#define DCXO_REQ_FORCEON_SHFT			30
+#define DCXO_REQ_FORCEOFF_MSK			0x1
+#define DCXO_REQ_FORCEOFF_SHFT			31
+
+/* RC_CENTRAL_CFG2[8] */
+#define SRCLKENAO_MODE				(0)
+#define VREQ_MODE				(1)
+
+/* RC_CENTRAL_CFG2[25] */
+#define RC_32K					(0)
+#define RC_ULPOSC1				(1)
+
+/* Signal Control Mode */
+#define MERGE_OR_MODE				(0x0)
+#define BYPASS_MODE				(0x1)
+#define MERGE_AND_MODE				(0x1 << 1)
+#define BYPASS_RC_MODE				(0x2 << 1)
+#define BYPASS_OR_MODE				(0x3)
+#define BYPASS_OTHER_MODE			(0x3 << 1)
+#define ASYNC_MODE				(0x1 << 3)
+
+#define RC_CMD_ARB_CFG				(RC_BASE + 0x000C)
+#define SW_RC_EN_MSK				0x1fff
+#define SW_RC_EN_SHFT				0
+#define SW_RCEN_EN_MSK				0x1fff
+#define SW_RCEN_EN_SHFT				13
+#define SW_DCXO_M_EN_MSK			0x1
+#define SW_DCXO_M_EN_SHFT			28
+#define SW_DCXO_M_MSK				0x7
+#define SW_DCXO_M_SHFT				29
+
+#define RC_PMIC_RCEN_ADDR			(RC_BASE + 0x0010)
+#define RC_PMIC_RCEN_SET_CLR_ADDR		(RC_BASE + 0x0014)
+
+#define RC_DCXO_FPM_CFG				(RC_BASE + 0x0018)
+#define DCXO_FPM_CTRL_M_MSK			0xf
+#define DCXO_FPM_CTRL_M_SHFT			0
+#define SRCVOLTEN_FPM_MSK_B_MSK			0x1
+#define SRCVOLTEN_FPM_MSK_B_SHFT		4
+#define SUB_SRCLKEN_FPM_MSK_B_MSK		0x1fff
+#define SUB_SRCLKEN_FPM_MSK_B_SHFT		16
+
+#define RC_CENTRAL_CFG3				(RC_BASE + 0x001C)
+#define TO_LPM_SETTLE_EN_MSK			0x1
+#define TO_LPM_SETTLE_EN_SHFT			0
+#define BLK_SCP_DXCO_MD_TARGET_MSK		0x1
+#define BLK_SCP_DXCO_MD_TARGET_SHFT		1
+#define BLK_COANT_DXCO_MD_TARGET_MSK		0x1
+#define BLK_COANT_DXCO_MD_TARGET_SHFT		2
+#define TO_BBLPM_SETTLE_EN_MSK			0x1
+#define TO_BBLPM_SETTLE_EN_SHFT			3
+#define TO_BBLPM_SETTLE_ND_EN_MSK		0x1
+#define TO_BBLPM_SETTLE_ND_EN_SHFT		4
+#define TO_LPM_SETTLE_T_MSK			0x3ff
+#define TO_LPM_SETTLE_T_SHFT			12
+
+#define RC_M00_SRCLKEN_CFG			(RC_BASE + 0x0020)
+#define DCXO_SETTLE_BLK_EN_MSK			0x1
+#define DCXO_SETTLE_BLK_EN_SHFT			1
+#define BYPASS_CMD_EN_MSK			0x1
+#define BYPASS_CMD_EN_SHFT			2
+#define SW_SRCLKEN_RC_MSK			0x1
+#define SW_SRCLKEN_RC_SHFT			3
+#define SW_SRCLKEN_FPM_MSK			0x1
+#define SW_SRCLKEN_FPM_SHFT			4
+#define SW_SRCLKEN_BBLPM_MSK			0x1
+#define SW_SRCLKEN_BBLPM_SHFT			5
+#define XO_SOC_LINKAGE_EN_MSK			0x1
+#define XO_SOC_LINKAGE_EN_SHFT			6
+#define REQ_ACK_LOW_IMD_EN_MSK			0x1
+#define REQ_ACK_LOW_IMD_EN_SHFT			7
+#define SRCLKEN_TRACK_M_EN_MSK			0x1
+#define SRCLKEN_TRACK_M_EN_SHFT			8
+#define CNT_PRD_STEP_MSK			0x3
+#define CNT_PRD_STEP_SHFT			10
+#define XO_STABLE_PRD_MSK			0x3ff
+#define XO_STABLE_PRD_SHFT			12
+#define DCXO_STABLE_PRD_MSK			0x3ff
+#define DCXO_STABLE_PRD_SHFT			22
+
+#define SRCLKEN_SW_CON_CFG			(RC_BASE + 0x0058)
+#define TACE_EN_MSK				0x1
+#define TACE_EN_SHFT				0
+
+#define RC_CENTRAL_CFG4				(RC_BASE + 0x005C)
+#define KEEP_RC_SPI_ACTIVE_MSK			0x1fff
+#define KEEP_RC_SPI_ACTIVE_SHFT			0
+#define PWRAP_VLD_FORCE_MSK			0x1
+#define PWRAP_VLD_FORCE_SHFT			16
+#define SLEEP_VLD_MODE_MSK			0x1
+#define SLEEP_VLD_MODE_SHFT			17
+#define SCP_SLEEP_REQ_MODE_MSK			0x1
+#define SCP_SLEEP_REQ_MODE_SHFT			18
+#define SLEEP_REQ_MODE_MSK			0x1
+#define SLEEP_REQ_MODE_SHFT			20
+#define BYPASS_PMIF_M_MSK			0x1
+#define BYPASS_PMIF_M_SHFT			24
+#define BYPASS_PMIF_P_MSK			0x1
+#define BYPASS_PMIF_P_SHFT			25
+
+#define RC_DEBUG_CFG				(RC_BASE + 0x0064)
+#define TRACE_MODE_EN_MSK			0x1
+#define TRACE_MODE_EN_SHFT			24
+#define DBG_STOP_PROT_EN_MSK			0x1
+#define DBG_STOP_PROT_EN_SHFT			28
+
+#define RC_CENTRAL_CFG5				(RC_BASE + 0x0070)
+#define SPMI_CMD_BYTE_CNT_MSK			0x1
+#define SPMI_CMD_BYTE_CNT_SHFT			0
+#define SPMI_M_SLV_ID_MSK			0xF
+#define SPMI_M_SLV_ID_SHFT			5
+#define SPMI_P_SLV_ID_MSK			0xF
+#define SPMI_P_SLV_ID_SHFT			9
+#define SPMI_M_PMIF_ID_MSK			0x1
+#define SPMI_M_PMIF_ID_SHFT			17
+#define SPMI_P_PMIF_ID_MSK			0x1
+#define SPMI_P_PMIF_ID_SHFT			18
+#define SPMI_M_CMD_TYPE_MSK			0x3
+#define SPMI_M_CMD_TYPE_SHFT			19
+#define SPMI_P_CMD_TYPE_MSK			0x3
+#define SPMI_P_CMD_TYPE_SHFT			21
+#define SPMI_M_WRITE_EN_MSK			0x1
+#define SPMI_M_WRITE_EN_SHFT			23
+#define SPMI_P_WRITE_EN_MSK			0x1
+#define SPMI_P_WRITE_EN_SHFT			24
+#define BROADCAST_MODE_EN_MSK			0x1
+#define BROADCAST_MODE_EN_SHFT			25
+#define MULTI_CMD_MODE_EN_MSK			0x1
+#define MULTI_CMD_MODE_EN_SHFT			26
+#define DCXO_ENCODE_MSK				0x1
+#define DCXO_ENCODE_SHFT			27
+#define SPMI_M_FIRST_MSK			0x1
+#define SPMI_M_FIRST_SHFT			28
+
+#define RC_CENTRAL_CFG6				(RC_BASE + 0x74)
+#define REQ_TO_DCXO_MASK_MSK			0xFFFF
+#define REQ_TO_DCXO_MASK_SHFT			0
+#define REQ_TO_SPMI_P_MASK_B_MSK		0xFFFF
+#define REQ_TO_SPMI_P_MASK_B_SHFT		16
+
+#define RCEN_MT_PMIF_SLV_ID_MSK			0xF
+#define RCEN_MT_M_CFG_0				(RC_BASE + 0x78)
+#define RCEN_MT_M_CFG_1				(RC_BASE + 0x7C)
+#define RCEN_MT_P_CFG_0				(RC_BASE + 0x80)
+#define RCEN_MT_P_CFG_1				(RC_BASE + 0x84)
+
+#define RCEN_MT_CFG_0				(RC_BASE + 0x88)
+#define PMIC_M_COUNTER_VAL_MSK			0xF
+#define PMIC_M_COUNTER_VAL_SHFT			0
+#define PMIC_P_COUNTER_VAL_MSK			0xF
+#define PMIC_P_COUNTER_VAL_SHFT			4
+
+#define SUBSYS_INTF_CFG				(RC_BASE + 0x00BC)
+#define SRCLKEN_FPM_MASK_B_MSK			0x3fff
+#define SRCLKEN_FPM_MASK_B_SHFT			0
+#define SRCLKEN_BBLPM_MASK_B_MSK		0x3fff
+#define SRCLKEN_BBLPM_MASK_B_SHFT		16
+
+#define RC_SPI_STA_0				(RC_STATE_BASE + 0x000C)
+
+#define RC_PI_PO_STA				(RC_STATE_BASE + 0x0010)
+
+#define RC_M00_REQ_STA_0			(RC_STATE_BASE + 0x0014)
+#define FPM_ACK_MSK				0x1
+#define FPM_ACK_SHFT				1
+#define BBLPM_ACK_MSK				0x1
+#define BBLPM_ACK_SHFT				3
+
+#define NO_REQ					(0)
+#define FPM_REQ					(1 << SW_SRCLKEN_FPM_SHFT)
+#define BBLPM_REQ				(1 << SW_SRCLKEN_BBLPM_SHFT)
+
+enum chn_id {
+	CHN_SUSPEND = 0,
+	CHN_MD0,
+	CHN_MD1,
+	CHN_MD2,
+	CHN_MDRF,
+	CHN_MMWAVE = 5,
+	CHN_GPS,
+	CHN_BT,
+	CHN_WIFI,
+	CHN_CONN_MCU,
+	CHN_COANT = 10,
+	CHN_NFC,
+	CHN_SUSPEND2,
+	CHN_UFS,
+	MAX_CHN_NUM,
+};
+
+enum rc_ctrl_m {
+	HW_MODE = 0,
+	SW_MODE = 1,
+	INIT_MODE = 0xff,
+};
+
+enum pmic_interface {
+	PMIF_VLD_RDY = 0,
+	PMIF_SLP_REQ,
+	PMIF_MAX,
+};
+
+enum {
+	SRLCKEN_RC_BRINGUP = 0,
+	SRCLKEN_RC_DISABLE,
+	SRCLKEN_RC_ENABLE,
+	SRCLKEN_RC_SKIP,
+};
+
+struct subsys_rc_con {
+	enum chn_id id;
+	unsigned int dcxo_prd;
+	unsigned int xo_prd;
+	unsigned int cnt_step;
+	unsigned int track_en;
+	unsigned int req_ack_imd_en;
+	unsigned int xo_soc_link_en;
+	unsigned int sw_bblpm;
+	unsigned int sw_fpm;
+	unsigned int sw_rc;
+	unsigned int bypass_cmd;
+	unsigned int dcxo_settle_blk_en;
+};
+
+int srclken_rc_init(void);
+#endif /* _SRCLKEN_RC_H_ */

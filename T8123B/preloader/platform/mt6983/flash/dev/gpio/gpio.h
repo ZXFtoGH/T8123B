@@ -1,0 +1,20 @@
+#pragma once
+
+#if (DA_MODE_FPGA == 1)
+#define BOOT_TRAP_MASK  (0xFFFFFFFF)
+#define INFRACFG_AO_BASE (0x10001000)
+#define TRAP_TEST_RD (0x10001ed0)
+#define BOOT_FROM_SNAND (0x80800020)
+#define BOOT_FROM_EMMC  (0x80800010)
+#define BOOT_FROM_PNAND (0x80800000)
+
+#else
+#define BOOT_TRAP_MASK  (0x00380000)
+#define INFRACFG_AO_BASE (0x10001000)
+#define TRAP_TEST_RD (0x100056f0)
+#define BOOT_FROM_PNAND (0x00000000)
+#define BOOT_FROM_EMMC  (0x00080000)
+#define BOOT_FROM_SNAND (0x00100000)
+#endif
+
+#define BOOT_FROM_UFS (0x0) // to be continue.

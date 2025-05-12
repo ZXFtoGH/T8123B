@@ -1,0 +1,7 @@
+#DA_BR_FPGA DA_BR_ES DA_BR
+ifeq ($(FPGA_PROJECT),)
+DA_MODES := DA_BR
+else
+DA_MODES := DA_BR_FPGA
+endif
+

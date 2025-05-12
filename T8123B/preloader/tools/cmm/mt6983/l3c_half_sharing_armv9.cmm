@@ -1,0 +1,75 @@
+// mcusys register base
+&mp0_cluster_cfg0=0x0c000060
+&mp0_cluster_ppu=0x0c830000
+// offset
+&l3_share_FULLnHALF=(0<<0)
+&l3_share_pre_en=(1<<2)
+&l3_share_en=(1<<1)
+
+&cache_pwr_req=0x10      ; [6]=0b1, [5:4]=0b01
+&cache_pwr_req_mask=0x70 ; [6]=0b1, [5:4]=0b11
+&slice_pwr_req_mask=0x40 ; [6]=0b1
+
+; ==Step -1: One slice on only==
+; Configured the "IMP_CLUSTERPWRCTLR_EL1[6]"
+&config=data.long(SPR:0x30f35)
+&config=&config&(~&slice_pwr_req_mask)
+d.s SPR:0x30f35 %long &config
+
+; ==Step 0: PPU==
+&ppu_config=0x1000100
+d.s c:&mp0_cluster_ppu %long &ppu_config   ; power on cluster PPU
+&config=data.long(c:&mp0_cluster_ppu)
+while &config!=&ppu_config
+(
+d.s c:&mp0_cluster_ppu %long &ppu_config   ; power on cluster PPU
+)
+
+; ==Step 1==
+&config=data.long(c:&mp0_cluster_cfg0)
+&config=&config|&l3_share_FULLnHALF
+d.s c:&mp0_cluster_cfg0 %long &config   ; Set half sharing
+
+; ==Step 2==
+; L3_SHARE_CONFIG0[2]
+; Configured the "rg_l3c_share_pre_en" to 1 for fixing the SRAM power.
+&config=data.long(c:&mp0_cluster_cfg0)
+&config=&config|&l3_share_pre_en
+d.s c:&mp0_cluster_cfg0 %long &config
+
+; ==Step 3==
+; Not required to enable SCTRL.CP15BEN[5] for EL3. It is always enabled.
+
+; ==Step 4==
+; CP15DSB
+; MCR p15,0,<Rt>,c7,c10,4 ; ignoring the value in Rt
+;d.s c15:0x04a7 %long 0x1 ; dsb
+
+; ==Step 5==
+; Configured the "IMP_CLUSTERPWRCTLR_EL1[5:4]"
+; register to "2b00" (FULL Share) or "2b01" (HALF Share)
+&config=data.long(SPR:0x30f35)
+&config=&config&(~&cache_pwr_req_mask)
+&config=&config|(&cache_pwr_req)
+d.s SPR:0x30f35 %long &config
+
+; ==Step 6==
+; Polling the "IMP_CLUSTERPWRSTAT_EL1[5:4]"
+;register is equal to "2b00" (FULL Share) or "2b01" (HALF Share)
+&clusterpwrctlr=data.long(SPR:0x30f37)
+while &clusterpwrctlr!=&cache_pwr_req
+(
+;d.s c15:0x04a7 %long 0x1 ; dsb
+&clusterpwrctlr=data.long(SPR:0x30f37)
+)
+
+; ==Step 7==
+; L3_SHARE_CONFIG0[1]
+; Configured the "rg_l3c_share_en" to 1 for enabling the L3 Share function.
+&config=data.long(c:&mp0_cluster_cfg0)
+&config=&config|&l3_share_en
+d.s c:&mp0_cluster_cfg0 %long &config
+
+; ==Step 8==
+; CP15DSB
+;d.s c15:0x04a7 %long 0x1 ; dsb

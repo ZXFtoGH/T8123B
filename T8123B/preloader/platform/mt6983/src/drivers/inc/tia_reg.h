@@ -1,0 +1,92 @@
+/* Copyright Statement:
+ *
+ * This software/firmware and related documentation ("MediaTek Software") are
+ * protected under relevant copyright laws. The information contained herein is
+ * confidential and proprietary to MediaTek Inc. and/or its licensors. Without
+ * the prior written permission of MediaTek inc. and/or its licensors, any
+ * reproduction, modification, use or disclosure of MediaTek Software, and
+ * information contained herein, in whole or in part, shall be strictly
+ * prohibited.
+ *
+ * MediaTek Inc. (C) 2021. All rights reserved.
+ *
+ * BY OPENING THIS FILE, RECEIVER HEREBY UNEQUIVOCALLY ACKNOWLEDGES AND AGREES
+ * THAT THE SOFTWARE/FIRMWARE AND ITS DOCUMENTATIONS ("MEDIATEK SOFTWARE")
+ * RECEIVED FROM MEDIATEK AND/OR ITS REPRESENTATIVES ARE PROVIDED TO RECEIVER
+ * ON AN "AS-IS" BASIS ONLY. MEDIATEK EXPRESSLY DISCLAIMS ANY AND ALL
+ * WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE OR
+ * NONINFRINGEMENT. NEITHER DOES MEDIATEK PROVIDE ANY WARRANTY WHATSOEVER WITH
+ * RESPECT TO THE SOFTWARE OF ANY THIRD PARTY WHICH MAY BE USED BY,
+ * INCORPORATED IN, OR SUPPLIED WITH THE MEDIATEK SOFTWARE, AND RECEIVER AGREES
+ * TO LOOK ONLY TO SUCH THIRD PARTY FOR ANY WARRANTY CLAIM RELATING THERETO.
+ * RECEIVER EXPRESSLY ACKNOWLEDGES THAT IT IS RECEIVER'S SOLE RESPONSIBILITY TO
+ * OBTAIN FROM ANY THIRD PARTY ALL PROPER LICENSES CONTAINED IN MEDIATEK
+ * SOFTWARE. MEDIATEK SHALL ALSO NOT BE RESPONSIBLE FOR ANY MEDIATEK SOFTWARE
+ * RELEASES MADE TO RECEIVER'S SPECIFICATION OR TO CONFORM TO A PARTICULAR
+ * STANDARD OR OPEN FORUM. RECEIVER'S SOLE AND EXCLUSIVE REMEDY AND MEDIATEK'S
+ * ENTIRE AND CUMULATIVE LIABILITY WITH RESPECT TO THE MEDIATEK SOFTWARE
+ * RELEASED HEREUNDER WILL BE, AT MEDIATEK'S OPTION, TO REVISE OR REPLACE THE
+ * MEDIATEK SOFTWARE AT ISSUE, OR REFUND ANY SOFTWARE LICENSE FEES OR SERVICE
+ * CHARGE PAID BY RECEIVER TO MEDIATEK FOR SUCH MEDIATEK SOFTWARE AT ISSUE.
+ *
+ * The following software/firmware and/or related documentation ("MediaTek
+ * Software") have been modified by MediaTek Inc. All revisions are subject to
+ * any receiver's applicable license agreements with MediaTek Inc.
+ */
+#ifndef __TIA_REGS_H__
+#define __TIA_REGS_H__
+
+/******************* TIA2.0 Register ****************/
+#define TIA2_MODE_CTRL            (TIA_BASE+0xE28)
+#define TIA2_MD_RC_CTRL           (TIA_BASE+0xE2C)
+#define TIA2_GPS_RC_CTRL          (TIA_BASE+0xE30)
+#define TIA2_AP_RC_CTRL           (TIA_BASE+0xE34)
+#define TIA2_ADC_INI_DLY          (TIA_BASE+0xE38)
+#define TIA2_RC_30K_DLY           (TIA_BASE+0xE3C)
+#define TIA2_RC_100K_DLY          (TIA_BASE+0xE40)
+#define TIA2_RC_400K_DLY          (TIA_BASE+0xE44)
+#define TIA2_ADC15_CON_DLY        (TIA_BASE+0xE48)
+#define TIA2_ADC12_30K_CON_DLY    (TIA_BASE+0xE4C)
+#define TIA2_ADC12_100K_CON_DLY   (TIA_BASE+0xE50)
+#define TIA2_ADC12_400K_CON_DLY0  (TIA_BASE+0xE54)
+#define TIA2_ADC12_400K_CON_DLY1  (TIA_BASE+0xE58)
+#define TIA2_ADC12_CON_SRCLK      (TIA_BASE+0xE5C)
+#define TIA2_ADC_SET_ADDR         (TIA_BASE+0xE60)
+#define TIA2_TSX_30K_CMD          (TIA_BASE+0xE64)
+#define TIA2_TSX_100K_CMD         (TIA_BASE+0xE68)
+#define TIA2_TSX_400K_CMD         (TIA_BASE+0xE6C)
+#define TIA2_ADC15_DCXO_CMD       (TIA_BASE+0xE70)
+#define TIA2_ADC12_DCXO_CMD       (TIA_BASE+0xE74)
+#define TIA2_T0_30K_CMD           (TIA_BASE+0xE78)
+#define TIA2_T1_30K_CMD           (TIA_BASE+0xE7C)
+#define TIA2_T2_30K_CMD           (TIA_BASE+0xE80)
+#define TIA2_T3_30K_CMD           (TIA_BASE+0xE84)
+#define TIA2_T0_100K_CMD          (TIA_BASE+0xE88)
+#define TIA2_T1_100K_CMD          (TIA_BASE+0xE8C)
+#define TIA2_T2_100K_CMD          (TIA_BASE+0xE90)
+#define TIA2_T3_100K_CMD          (TIA_BASE+0xE94)
+#define TIA2_T0_400K_CMD          (TIA_BASE+0xE98)
+#define TIA2_T1_400K_CMD          (TIA_BASE+0xE9C)
+#define TIA2_T2_400K_CMD          (TIA_BASE+0xEA0)
+#define TIA2_T3_400K_CMD          (TIA_BASE+0xEA4)
+#define TIA2_ADC15_TRIG_ADDR      (TIA_BASE+0xEA8)
+#define TIA2_ADC12_TRIG_ADDR      (TIA_BASE+0xEAC)
+#define TIA2_ADC15_TRIG_CMD       (TIA_BASE+0xEB0)
+#define TIA2_ADC12_TRIG_CMD0      (TIA_BASE+0xEB4)
+#define TIA2_ADC12_TRIG_CMD1      (TIA_BASE+0xEB8)
+#define TIA2_ADC15_READ_ADDR      (TIA_BASE+0xEBC)
+#define TIA2_ADC12_READ_ADDR0     (TIA_BASE+0xEC0)
+#define TIA2_ADC12_READ_ADDR1     (TIA_BASE+0xEC4)
+#define TIA2_READY_CLR            (TIA_BASE+0xEC8)
+#define TIA2_MD_TSX_DATA          (TIA_BASE+0xECC)
+#define TIA2_GPS_TSX_DATA         (TIA_BASE+0xED0)
+#define TIA2_T0_DATA              (TIA_BASE+0xED4)
+#define TIA2_T1_DATA              (TIA_BASE+0xED8)
+#define TIA2_T2_DATA              (TIA_BASE+0xEDC)
+#define TIA2_T3_DATA              (TIA_BASE+0xEE0)
+#define TIA2_DCXO_DATA            (TIA_BASE+0xEE4)
+#define TIA2_SPMI_CMD             (TIA_BASE+0xEE8)
+#define TIA2_DEBUG                (TIA_BASE+0xEF0)
+#endif //__TIA_REGS_H__
+

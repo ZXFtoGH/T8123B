@@ -1,0 +1,22 @@
+###################################################################
+# Symbol
+###################################################################
+
+D_BIN	= $(PRELOADER_OUT)/bin
+D_OBJ	= $(PRELOADER_OUT)/obj
+###################################################################
+# CHIP , PLATFORM , TGTCPU and ENV definition
+###################################################################
+
+VERSION = 2
+C_DEF	+= $(CHIP) BOOTROM_VERSION=$(VERSION)
+
+C_DEF	+= _BOARD
+
+TGTCPU = $(_CPU)
+
+ENV = preloader
+
+C_DEF	+= $(ENV)
+
+DEFINE   = $(foreach def,$(C_DEF),-D$(def))

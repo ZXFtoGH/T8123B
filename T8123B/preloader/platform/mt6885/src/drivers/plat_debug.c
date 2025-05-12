@@ -1,0 +1,66 @@
+/* Copyright Statement:
+*
+* This software/firmware and related documentation ("MediaTek Software") are
+* protected under relevant copyright laws. The information contained herein
+* is confidential and proprietary to MediaTek Inc. and/or its licensors.
+* Without the prior written permission of MediaTek inc. and/or its licensors,
+* any reproduction, modification, use or disclosure of MediaTek Software,
+* and information contained herein, in whole or in part, shall be strictly prohibited.
+*/
+/* MediaTek Inc. (C) 2018. All rights reserved.
+*
+* BY OPENING THIS FILE, RECEIVER HEREBY UNEQUIVOCALLY ACKNOWLEDGES AND AGREES
+* THAT THE SOFTWARE/FIRMWARE AND ITS DOCUMENTATIONS ("MEDIATEK SOFTWARE")
+* RECEIVED FROM MEDIATEK AND/OR ITS REPRESENTATIVES ARE PROVIDED TO RECEIVER ON
+* AN "AS-IS" BASIS ONLY. MEDIATEK EXPRESSLY DISCLAIMS ANY AND ALL WARRANTIES,
+* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE IMPLIED WARRANTIES OF
+* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE OR NONINFRINGEMENT.
+* NEITHER DOES MEDIATEK PROVIDE ANY WARRANTY WHATSOEVER WITH RESPECT TO THE
+* SOFTWARE OF ANY THIRD PARTY WHICH MAY BE USED BY, INCORPORATED IN, OR
+* SUPPLIED WITH THE MEDIATEK SOFTWARE, AND RECEIVER AGREES TO LOOK ONLY TO SUCH
+* THIRD PARTY FOR ANY WARRANTY CLAIM RELATING THERETO. RECEIVER EXPRESSLY ACKNOWLEDGES
+* THAT IT IS RECEIVER'S SOLE RESPONSIBILITY TO OBTAIN FROM ANY THIRD PARTY ALL PROPER LICENSES
+* CONTAINED IN MEDIATEK SOFTWARE. MEDIATEK SHALL ALSO NOT BE RESPONSIBLE FOR ANY MEDIATEK
+* SOFTWARE RELEASES MADE TO RECEIVER'S SPECIFICATION OR TO CONFORM TO A PARTICULAR
+* STANDARD OR OPEN FORUM. RECEIVER'S SOLE AND EXCLUSIVE REMEDY AND MEDIATEK'S ENTIRE AND
+* CUMULATIVE LIABILITY WITH RESPECT TO THE MEDIATEK SOFTWARE RELEASED HEREUNDER WILL BE,
+* AT MEDIATEK'S OPTION, TO REVISE OR REPLACE THE MEDIATEK SOFTWARE AT ISSUE,
+* OR REFUND ANY SOFTWARE LICENSE FEES OR SERVICE CHARGE PAID BY RECEIVER TO
+* MEDIATEK FOR SUCH MEDIATEK SOFTWARE AT ISSUE.
+*
+* The following software/firmware and/or related documentation ("MediaTek Software")
+* have been modified by MediaTek Inc. All revisions are subject to any receiver\'s
+* applicable license agreements with MediaTek Inc.
+*/
+
+#include <plat_debug.h>
+#include <sec_debugport.h>
+
+#define EINT_EVENT_MASK_CLR0	*(unsigned int *)(0x1000B880)
+#define EINT_EVENT_MASK_CLR1	*(unsigned int *)(0x1000B884)
+#define EINT_EVENT_MASK_CLR2	*(unsigned int *)(0x1000B888)
+#define EINT_EVENT_MASK_CLR3	*(unsigned int *)(0x1000B88C)
+#define EINT_EVENT_MASK_CLR4	*(unsigned int *)(0x1000B890)
+#define EINT_EVENT_MASK_CLR5	*(unsigned int *)(0x1000B894)
+#define EINT_EVENT_MASK_CLR6	*(unsigned int *)(0x1000B898)
+
+void mcu_dfd_debug_en(void)
+{
+	/* enable mcu dfd debug */
+	seclib_dbgport_config(DCU_EN_0, MCU_DFD, MCU_DFD);
+}
+
+void unmask_eint_event_mask(void) {
+
+	print("Unmask all EINT event mask\n");
+
+	EINT_EVENT_MASK_CLR0 = 0xFFFFFFFF;
+	EINT_EVENT_MASK_CLR1 = 0xFFFFFFFF;
+	EINT_EVENT_MASK_CLR2 = 0xFFFFFFFF;
+	EINT_EVENT_MASK_CLR3 = 0xFFFFFFFF;
+	EINT_EVENT_MASK_CLR4 = 0xFFFFFFFF;
+	EINT_EVENT_MASK_CLR5 = 0xFFFFFFFF;
+	EINT_EVENT_MASK_CLR6 = 0xFFFFFFFF;
+
+	return;
+}

@@ -1,0 +1,64 @@
+###################################################################
+# Setting Feature Compiler Option
+###################################################################
+C_OPTION += -DARM_ISA_ARMV7=1
+C_OPTION += -DARM_CPU_CORTEX_A53=1
+C_OPTION += -DARM_WITH_CACHE=1
+
+ifeq ($(DA_BUILD_STAGE),1)
+    C_OPTION += -DSTAGE_DA_INIT=1
+else
+    C_OPTION += -DSTAGE_DA_LOOP=1
+    C_OPTION += -DDA_ENABLE_SECURITY_AUTHENTICATION_BY_SERVER=0
+endif
+
+C_OPTION += -DDA_DRAM_BASE_ADDRESS=0x40000000
+C_OPTION += -DDUMP_SPEED=0
+C_OPTION += -DENABLE_LOG_FOR_INIT_STAGE=1
+
+
+ifeq ($(strip "$(MTK_COMBO_NAND_SUPPORT)"),"yes")
+    C_OPTION += -DMTK_COMBO_NAND_SUPPORT
+endif
+
+ifeq ($(strip "$(MTK_EMMC_SUPPORT)"),"yes")
+    C_OPTION += -DMTK_EMMC_SUPPORT
+    # this platform do not define MTK_UFS_SUPPORT, so use this.
+    C_OPTION += -DMTK_UFS_SUPPORT
+endif
+
+ifeq ($(strip "$(MTK_UFS_SUPPORT)"),"yes")
+    C_OPTION += -DMTK_UFS_SUPPORT
+endif
+
+
+###################################################################
+# MERGE CODE USED. OPEN PRELOADER DRIVER IMPL
+# DRIVER OWNER NEED MODIFY IT AFTER CODE READY
+###################################################################
+C_OPTION += -DINTERFACE_CLDMA_IMPL=0
+C_OPTION += -DINTERFACE_EMMC_IMPL=1
+C_OPTION += -DINTERFACE_EFUSE_IMPL=1
+C_OPTION += -DINTERFACE_DRAM_IMPL=1
+C_OPTION += -DINTERFACE_GIC_IMPL=1
+C_OPTION += -DINTERFACE_NAND_IMPL=0
+C_OPTION += -DINTERFACE_PMIC_IMPL=1
+C_OPTION += -DINTERFACE_PCIE_IMPL=0
+C_OPTION += -DINTERFACE_PLL_IMPL=1
+C_OPTION += -DINTERFACE_POWER_IMPL=1
+C_OPTION += -DINTERFACE_RANDOM_IMPL=0
+C_OPTION += -DINTERFACE_TIMER_IMPL=1
+C_OPTION += -DINTERFACE_UFS_IMPL=1
+C_OPTION += -DINTERFACE_USB_IMPL=1
+C_OPTION += -DINTERFACE_UART_IMPL=1
+C_OPTION += -DINTERFACE_WDT_IMPL=1
+C_OPTION += -DINTERFACE_I2C_IMPL=1
+
+
+
+
+
+
+
+
+

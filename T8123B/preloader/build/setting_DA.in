@@ -1,0 +1,25 @@
+###################################################################
+# Symbol
+###################################################################
+
+DA_BIN = $(DA_OUT)/bin
+DA_OBJ1 = $(DA_OUT)/obj_DA1
+DA_OBJ2 = $(DA_OUT)/obj_DA2
+###################################################################
+# CHIP , PLATFORM , TGTCPU and ENV definition
+###################################################################
+
+#VERSION = 2
+#C_DEF	+= $(CHIP) BOOTROM_VERSION=$(VERSION)
+
+
+#PLATFORM = _BOARD
+#C_DEF	+= $(PLATFORM)
+
+#TGTCPU = $(_CPU)
+
+#ENV = preloader
+
+#C_DEF	+= $(ENV)
+
+#DEFINE   = $(foreach def,$(C_DEF),-D$(def))

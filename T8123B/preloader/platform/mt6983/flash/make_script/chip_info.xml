@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<chip>
+    <hw_code>0x0907</hw_code>
+    <hw_sub_code>0x8A00</hw_sub_code>
+    <hw_version>0xCA00</hw_version>
+    <sw_version>0x0000</sw_version>
+    <feature_set>0x0</feature_set>
+    <sram_code_start>0x1000000</sram_code_start>
+    <dram_code_start>0x40000000</dram_code_start>
+</chip>
