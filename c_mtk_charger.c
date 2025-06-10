@@ -20,7 +20,19 @@
  * Author:
  * -------
  * Wy Chuang
+ * 
  *
+ * 文件：mtk_charger.c
+
+版权：MediaTek Inc.
+描述：实现了电池充电的核心功能，包括充电状态管理、温度保护、充电算法（如 JEITA）、电源路径管理、快充协议（如 PD/PE）等。
+主要功能：
+	充电状态检测（USB/Type-C/PD 等）。
+	动态调整充电电流和电压（如 MIVR、AICL）。
+	温度监控和热保护（JEITA 协议）。
+	支持多种充电算法（如 Basic、Pulse、PE、PD 等）。
+	用户空间接口（通过 sysfs 和 procfs 暴露配置选项）。
+	支持智能充电（Smart Charging）功能。
  */
 #include <linux/init.h>		/* For init/exit macros */
 #include <linux/module.h>	/* For MODULE_ marcros  */
