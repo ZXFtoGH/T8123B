@@ -409,6 +409,14 @@ struct mtk_charger {
 	struct mutex pp_lock[CHG2_SETTING + 1];
 };
 
+/*
+MTK 充电驱动 中的一个内联函数
+将一个事件（如过压、过流、充满等）广播给所有已注册的快充算法模块（Fast Charging Algorithm），让它们做出相应的处理
+
+chg_alg_notifier_call() 是每个快充算法实现的回调接口，用于接收和处理事件。
+MAX_ALG_NO 是系统支持的最大快充算法数量，通常定义为 10。
+这种设计使得整个充电系统具有良好的扩展性和模块化能力，新增快充协议只需注册一个新的算法即可。
+*/
 static inline int mtk_chg_alg_notify_call(struct mtk_charger *info,
 					  enum chg_alg_notifier_events evt,
 					  int value)
