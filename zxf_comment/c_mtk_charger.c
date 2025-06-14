@@ -33,7 +33,212 @@
 	支持多种充电算法（如 Basic、Pulse、PE、PD 等）。
 	用户空间接口（通过 sysfs 和 procfs 暴露配置选项）。
 	支持智能充电（Smart Charging）功能。
+
+# MTK Charger Driver 详细解释
+
+这是一个用于联发科(MTK)平台的充电驱动代码，主要功能是管理设备的充电过程、电池状态监测以及与电源相关的各种操作。下面我将详细解释这个驱动程序的主要组成部分和功能：
+
+## 1. 驱动概述
+
+这个驱动程序是联发科平台充电系统的核心部分，负责：
+- 监测充电状态和电池状态
+- 管理充电算法
+- 处理各种充电协议（如PD、PE等）
+- 温度监控和保护
+- 与用户空间交互
+
+## 2. 主要数据结构
+
+### `struct mtk_charger`
+这是驱动的主要数据结构，包含了充电管理所需的所有信息：
+- 充电器设备指针（chg1_dev, chg2_dev等）
+- 电池和充电器属性
+- 各种配置参数（电压、电流限制等）
+- 温度监控相关数据
+- 线程和锁机制
+- 电源供应设备(psy)相关结构
+
+## 3. 主要功能模块
+
+### 3.1 充电状态管理
+
+- `mtk_is_charger_on()`: 检测充电器是否连接
+- `mtk_charger_plug_in()`: 处理充电器插入事件
+- `mtk_charger_plug_out()`: 处理充电器拔出事件
+- `charger_check_status()`: 检查充电状态
+
+### 3.2 充电算法
+
+- 支持多种充电算法（Basic, Pulse等）
+- 动态调整充电参数（电压、电流）
+- 温度控制（JEITA标准）
+- 智能充电（smart charging）功能
+
+### 3.3 温度监控和保护
+
+- 电池温度监测
+- 过热/过冷保护
+- JEITA温度控制
+- 充电器温度监测
+
+### 3.4 电源路径管理
+
+- 电源路径启用/禁用
+- 动态电源路径控制
+- 多充电器管理（主/从充电器）
+
+### 3.5 用户空间接口
+
+- sysfs属性文件（/sys/class/power_supply/...）
+- procfs接口（/proc/mtk_battery_cmd/...）
+- 通知机制（uevent）
+
+## 4. 主要文件操作
+
+### 4.1 sysfs接口
+
+驱动提供了多个sysfs属性文件，允许用户空间控制和监控充电行为：
+
+```c
+static DEVICE_ATTR_RW(sw_jeita);          // 软件JEITA控制
+static DEVICE_ATTR_RW(sw_ovp_threshold);  // 过压保护阈值
+static DEVICE_ATTR_RW(chr_type);          // 充电器类型
+static DEVICE_ATTR_RW(fast_chg_indicator); // 快速充电指示
+// ... 其他属性
+```
+
+### 4.2 procfs接口
+
+驱动在/proc/mtk_battery_cmd/下创建了多个文件用于调试和控制：
+
+```c
+/proc/mtk_battery_cmd/current_cmd      // 电流控制命令
+/proc/mtk_battery_cmd/en_power_path    // 电源路径控制
+/proc/mtk_battery_cmd/en_safety_timer  // 安全定时器控制
+/proc/mtk_battery_cmd/set_cv           // 设置充电电压
+```
+
+## 5. 电源供应子系统接口
+
+驱动通过power_supply子系统与上层交互：
+
+```c
+static enum power_supply_property charger_psy_properties[] = {
+    POWER_SUPPLY_PROP_ONLINE,
+    POWER_SUPPLY_PROP_PRESENT,
+    POWER_SUPPLY_PROP_VOLTAGE_MAX,
+    // ... 其他属性
+};
+
+static int psy_charger_get_property() {...}
+static int psy_charger_set_property() {...}
+```
+
+## 6. 充电算法实现
+
+驱动支持多种充电算法，通过`struct chg_alg_device`结构表示：
+
+```c
+struct chg_alg_device *alg = get_chg_alg_by_name("pe5"); // PE5.0算法
+alg = get_chg_alg_by_name("pe45");  // PE4.5算法
+alg = get_chg_alg_by_name("pe4");   // PE4.0算法
+alg = get_chg_alg_by_name("pd");     // PD协议
+```
+
+## 7. 温度控制
+
+驱动实现了JEITA温度控制算法：
+
+```c
+void do_sw_jeita_state_machine(struct mtk_charger *info)
+{
+    // 根据温度调整充电参数
+    if (info->battery_temp >= info->data.temp_t4_thres) {
+        // 温度过高，停止充电
+        sw_jeita->sm = TEMP_ABOVE_T4;
+        sw_jeita->charging = false;
+    } 
+    // 其他温度区间的处理...
+}
+```
+
+## 8. 智能充电功能
+
+驱动实现了智能充电功能，可以根据时间、电池状态等条件优化充电过程：
+
+```c
+int smart_charging(struct mtk_charger *info)
+{
+    // 计算剩余充电时间
+    int time_to_target = sc_left_time - info->sc.left_time_for_cv;
+    
+    // 根据条件调整充电行为
+    if (sc_battery_percentage > info->sc.target_percentage * 100) {
+        if (time_to_target > 0)
+            ret_value = SC_DISABLE; // 禁用充电
+    }
+    // ...
+}
+```
+
+## 9. 线程和定时器
+
+驱动使用内核线程和定时器来定期执行充电管理任务：
+
+```c
+static int charger_routine_thread(void *arg)
+{
+    // 主充电管理线程
+    while (1) {
+        wait_event_interruptible(info->wait_que, ...);
+        // 执行充电状态检查、算法更新等操作
+    }
+}
+
+static void mtk_charger_init_timer(struct mtk_charger *info)
+{
+    // 初始化充电定时器
+    alarm_init(&info->charger_timer, ALARM_BOOTTIME,
+            mtk_charger_alarm_timer_func);
+}
+```
+
+## 10. 特殊功能
+
+- KPOC（Kernel Power Off Charging）模式支持
+- MMI（Manufacturing Mode Interface）测试支持
+- 船运模式（ship mode）
+- 水分检测（water detection）
+
+## 11. 驱动初始化和退出
+
+```c
+static int __init mtk_charger_init(void)
+{
+    return platform_driver_register(&mtk_charger_driver);
+}
+
+static void __exit mtk_charger_exit(void)
+{
+    platform_driver_unregister(&mtk_charger_driver);
+}
+```
+
+## 总结
+
+这个MTK充电驱动是一个功能全面的充电管理系统，它提供了：
+1. 多种充电协议支持（PD、PE等）
+2. 全面的温度监控和保护
+3. 灵活的充电算法配置
+4. 丰富的用户空间接口
+5. 智能充电功能优化
+6. 各种特殊模式支持
+
+驱动通过内核线程定期检查充电状态，根据电池状态、温度、用户设置等因素动态调整充电参数，确保充电过程安全高效。
+
  */
+
+
 #include <linux/init.h>		/* For init/exit macros */
 #include <linux/module.h>	/* For MODULE_ marcros  */
 #include <linux/fs.h>
@@ -96,6 +301,7 @@ struct tag_bootmode {
 static int is_basic_charger_lcmoff = 0;
 int thermal_over39 = 0;
 EXPORT_SYMBOL(thermal_over39);
+
 #ifdef MODULE
 static char __chg_cmdline[COMMAND_LINE_SIZE];
 static char *chg_cmdline = __chg_cmdline;
@@ -124,8 +330,8 @@ const char *chg_get_cmd(void)
 
 	return chg_cmdline;
 }
-
 #else
+
 const char *chg_get_cmd(void)
 {
 	return saved_command_line;
@@ -138,25 +344,58 @@ int get_basic_charger_lcmoff(void)
 }
 EXPORT_SYMBOL(get_basic_charger_lcmoff);
 
+/*
+判断当前系统是否运行在 GMS 测试模式下（Google Mobile Services Test Mode），
+依据是启动命令行中是否包含特定的序列号关键字。
+这个函数会从系统的启动命令行中查找一个特定的关键字 "gmstest.serialno="，
+如果找到，并且其后的字符串是以 "sngmstest" 开头，则返回 true，表示当前处于 GMS 测试模式；否则返回 false。
+*/
 static bool is_gms_test_by_serialno(void)
 {
-	char atm_str[64] = {0};
+	char atm_str[64] = {0};	//临时缓冲区，保存提取出来的序列号
 	char *ptr = NULL, *ptr_e = NULL;
-	char keyword[] = "gmstest.serialno=";
+	char keyword[] = "gmstest.serialno=";	//要查找的关键字
 	int size = 0;
 
+	/*
+	chg_get_cmd()：获取系统启动命令行（通常类似于 /proc/cmdline 的内容）。
+	strstr(..., keyword)：查找是否有 "gmstest.serialno=" 这个子串。
+	如果没找到，直接跳到 end，返回 false。
+	*/
 	ptr = strstr(chg_get_cmd(), keyword);
 	if (ptr != 0) {
+		/*
+		查找结束位置（空格）
+			在 keyword 后面查找第一个空格字符，作为提取的结束位置。
+			如果找不到空格，说明格式不对，也直接返回 false。
+		*/
 		ptr_e = strstr(ptr, " ");
 		if (ptr_e == 0)
 			goto end;
 
+		/*
+		提取关键字后面的字符串
+			计算出要复制的字符串长度 size。
+			使用 strncpy 把 keyword 后面的内容复制到 atm_str 中。
+			最后加上字符串结束符 \0。
+
+		例如：
+		cmdline: ... gmstest.serialno=sngmstest123 ...
+					↑                     ↑
+					ptr                  ptr_e
+		提取结果就是："sngmstest123"
+		*/
 		size = ptr_e - (ptr + strlen(keyword));
 		if (size <= 0)
 			goto end;
 		strncpy(atm_str, ptr + strlen(keyword), size);
 		atm_str[size] = '\0';
 
+		/*
+		判断是否以 "sngmstest" 开头
+			如果提取的字符串是以 "sngmstest" 开头，则返回 true，表示进入了 GMS 测试模式。
+			否则返回 false。
+		*/
 		if (!strncmp(atm_str, "sngmstest", strlen("sngmstest")))
 			return true;
 	}
@@ -164,6 +403,18 @@ static bool is_gms_test_by_serialno(void)
 end:
 	pr_info("%s: atm_str: %s\n", __func__, atm_str);
 	return false;
+
+	/*
+	示例输入输出
+	✅ 示例 1：匹配成功
+		cmdline = "bootmode=normal gmstest.serialno=sngmstest123 androidboot.mode=charger"
+		提取到的 atm_str = "sngmstest123"
+		以 "sngmstest" 开头 → 返回 true
+	❌ 示例 2：匹配失败
+		cmdline = "bootmode=normal gmstest.serialno=testabc123"
+		提取到的 atm_str = "testabc123"
+		不以 "sngmstest" 开头 → 返回 false
+	*/
 }
 
 int chr_get_debug_level(void)
@@ -234,14 +485,21 @@ int mtk_charger_notifier(struct mtk_charger *info, int event)
 	return srcu_notifier_call_chain(&info->evt_nh, event, NULL);
 }
 
+//用于 解析设备树（Device Tree）中与 MediaTek 充电器驱动相关的配置信息
 static void mtk_charger_parse_dt(struct mtk_charger *info,
 				struct device *dev)
 {
-	struct device_node *np = dev->of_node;
+	struct device_node *np = dev->of_node;	//获取当前设备对应的设备树节点（device node），后续将从中读取属性
 	u32 val = 0;
 	struct device_node *boot_node = NULL;
 	struct tag_bootmode *tag = NULL;
 
+	/*
+	获取启动模式（bootmode）
+	使用 of_parse_phandle() 从设备树中查找名为 "bootmode" 的 phandle（指向另一个节点）。
+	如果找到该节点，则使用 of_get_property() 获取其中的 "atag,boot" 属性（通常是内核早期启动时传入的 boot 参数）。
+	将 bootmode 和 boottype 存入 info 中，供后续判断是否为关机充电模式等用途。
+	*/
 	boot_node = of_parse_phandle(dev->of_node, "bootmode", 0);
 	if (!boot_node)
 		chr_err("%s: failed to get boot mode phandle\n", __func__);
@@ -259,35 +517,108 @@ static void mtk_charger_parse_dt(struct mtk_charger *info,
 		}
 	}
 
-	if (of_property_read_string(np, "algorithm_name",
-		&info->algorithm_name) < 0) {
+	/*
+	int of_property_read_string(struct device_node *np,
+                           const char *propname,
+                           const char **out_string);
+	参数说明
+		np: 指向设备树节点的指针，代表要读取属性的设备节点
+		propname: 要读取的属性名称，本例中是 "algorithm_name"
+		out_string: 用于存储读取到的字符串值的指针地址
+	*/
+	/*
+	从设备树中读取字符串属性 "algorithm_name"，表示使用的充电算法类型。
+	如果没有设置，默认设为 "Basic"
+
+	这行代码的功能是：
+		从设备节点np中查找名为 "algorithm_name" 的属性
+		如果找到该属性且值为字符串类型，将字符串的指针存储到info->algorithm_name中
+		返回操作结果（成功或错误码）
+	*/
+	if (of_property_read_string(np, "algorithm_name", &info->algorithm_name) < 0) {
 		chr_err("%s: no algorithm_name name\n", __func__);
 		info->algorithm_name = "Basic";
 	}
 
 	if (strcmp(info->algorithm_name, "Basic") == 0) {
 		chr_err("found Basic\n");
-		mtk_basic_charger_init(info);
+		mtk_basic_charger_init(info);	//初始化基础充电逻辑mtk_basic_charger.c:734:int mtk_basic_charger_init(struct mtk_charger *info)
 	} else if (strcmp(info->algorithm_name, "Pulse") == 0) {
 		chr_err("found Pulse\n");
 		mtk_pulse_charger_init(info);
 	}
 
+	/*
+	bool of_property_read_bool(const struct device_node *np,
+                          const char *propname);
+	参数说明
+		np: 指向设备树节点的指针
+		propname: 要读取的属性名称，本例中是 "disable_charger"
+	*/
+	/*
+	读取布尔型配置项
+	disable_charger	是否禁用充电器（调试/测试用）
+	charger_unlimited	是否不限制充电电流（可能用于工厂测试）
+	atm_enabled	是否启用 Android Thermal Management（热管理）
+	enable_sw_safety_timer	是否启用软件安全定时器（防止长时间充电）
+	sw_safety_timer_setting	复制上面的值，用于保存设置
+	disable_aicl	是否禁用 AICL（输入电流限制检测）
+
+	info->disable_charger = of_property_read_bool(np, "disable_charger");
+	这行代码的功能是：
+		从设备节点np中查找名为 "disable_charger" 的属性
+		根据该属性的存在与否和值，返回一个布尔值
+		将返回的布尔值存储到info->disable_charger中
+	工作原理
+		在设备树中，布尔属性的表达方式有几种：
+			如果属性存在但没有值（空属性），返回true
+			如果属性值为"true"、"yes"、"on"，返回true
+			如果属性值为"false"、"no"、"off"，返回false
+			如果属性不存在，返回false
+	返回值
+		true: 属性存在且表示 "真"，或存在但无值
+		false: 属性不存在，或存在且表示 "假"
+	*/
 	info->disable_charger = of_property_read_bool(np, "disable_charger");
 	info->charger_unlimited = of_property_read_bool(np, "charger_unlimited");
 	info->atm_enabled = of_property_read_bool(np, "atm_is_enabled");
-	info->enable_sw_safety_timer =
-			of_property_read_bool(np, "enable_sw_safety_timer");
+	info->enable_sw_safety_timer = of_property_read_bool(np, "enable_sw_safety_timer");
 	info->sw_safety_timer_setting = info->enable_sw_safety_timer;
 	info->disable_aicl = of_property_read_bool(np, "disable_aicl");
 
 	/* common */
 
+	/*
+	int of_property_read_u32(const struct device_node *np,
+                        const char *propname,
+                        u32 *out_value);
+	参数说明
+		np: 指向设备树节点的指针
+		propname: 要读取的属性名称，本例中是 "charger_configuration"
+		out_value: 用于存储读取到的 32 位无符号整数值的指针
+	*/
+	/*
+	of_property_read_u32(np, "charger_configuration", &val)
+	这行代码的功能是：
+		从设备节点np中查找名为 "charger_configuration" 的属性
+		如果找到该属性且值为 32 位无符号整数类型，将值存储到val变量中
+		返回操作结果（成功或错误码）
+	工作原理
+		设备树中的整数属性通常以大端格式（网络字节序）存储。该函数会：
+			查找指定的属性
+			检查属性值的长度是否为 4 字节（32 位）
+			将大端格式的字节转换为系统的本地字节序
+			将转换后的值存储到out_value指向的内存位置
+	返回值
+		0: 成功读取属性
+		-EINVAL: 参数无效
+		-ENODATA: 属性不存在
+		-EOVERFLOW: 属性值长度不符合 32 位整数要求
+	*/
 	if (of_property_read_u32(np, "charger_configuration", &val) >= 0)
 		info->config = val;
 	else {
-		chr_err("use default charger_configuration:%d\n",
-			SINGLE_CHARGER);
+		chr_err("use default charger_configuration:%d\n", SINGLE_CHARGER);
 		info->config = SINGLE_CHARGER;
 	}
 
@@ -3787,50 +4118,78 @@ static struct notifier_block basic_charger_lcmoff_fb_notifier = {
        .notifier_call = basic_charger_lcmoff_fb_notifier_callback,
 };
 
+/*
+负责初始化充电器子系统相关的数据结构、资源、锁机制、电源供应接口（power supply）、线程等
+
+功能	描述
+数据结构初始化	为 mtk_charger 分配内存并初始化
+设备树解析	从设备树获取硬件配置
+锁机制	初始化 mutex、spinlock 等同步机制
+Wakelock	防止系统休眠
+等待队列 & 定时器	支持异步事件和定期轮询
+Power Supply 注册	注册多个电源供应接口（master/slave/divided）
+PD 适配器	支持 USB PD 快充协议
+充电线程	启动后台线程处理充电逻辑
+显示/电源管理回调	监听系统事件（如屏幕关闭、挂起恢复）
+*/
 static int mtk_charger_probe(struct platform_device *pdev)
 {
 	struct mtk_charger *info = NULL;
 	int i;
-	char *name = NULL;
+	char *name = NULL;	//声明一个字符指针 name，并初始化为 NULL,通常用于动态分配字符串，比如用于创建唤醒锁的名字、日志标识符等
 
 	chr_err("%s: starts\n", __func__);
 
 	info = devm_kzalloc(&pdev->dev, sizeof(*info), GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
-	platform_set_drvdata(pdev, info);
-	info->pdev = pdev;
 
-	mtk_charger_parse_dt(info, &pdev->dev);
+	platform_set_drvdata(pdev, info);	// 将 info 绑定到平台设备，便于后续访问
+	info->pdev = pdev;	// 保存平台设备指针pdev 到结构体中
 
-	mutex_init(&info->cable_out_lock);
-	mutex_init(&info->charger_lock);
-	mutex_init(&info->pd_lock);
+	mtk_charger_parse_dt(info, &pdev->dev);	// 解析设备树中的充电参数,填充到 info 结构体中
+
+	//初始化多个互斥锁，用于保护并发访问共享资源（如充电状态、PD 协议处理、电源路径等）
+	mutex_init(&info->cable_out_lock);	// 充电线缆状态锁
+	mutex_init(&info->charger_lock);	// 充电状态锁
+	mutex_init(&info->pd_lock);	// PD（Power Delivery）协议锁
 	for (i = 0; i < CHG2_SETTING + 1; i++) {
-		mutex_init(&info->pp_lock[i]);
-		info->force_disable_pp[i] = false;
-		info->enable_pp[i] = true;
+		mutex_init(&info->pp_lock[i]);	// 并行充电路径锁
+		info->force_disable_pp[i] = false;	 // 强制禁用并行充电路径标志
+		info->enable_pp[i] = true;	// 启用并行充电路径标志
 	}
+	
+	//初始化唤醒锁，防止在充电过程中系统进入休眠。
 	name = devm_kasprintf(&pdev->dev, GFP_KERNEL, "%s",
 		"charger suspend wakelock");
 	info->charger_wakelock =
-		wakeup_source_register(NULL, name);
-	spin_lock_init(&info->slock);
+		wakeup_source_register(NULL, name);	// 注册唤醒锁
+	spin_lock_init(&info->slock);	// 自旋锁（用于快速原子操作）
 
-	init_waitqueue_head(&info->wait_que);
-	info->polling_interval = CHARGING_INTERVAL;
-	mtk_charger_init_timer(info);
+	init_waitqueue_head(&info->wait_que);	// 初始化等待队列（用于线程休眠等待事件）
+	info->polling_interval = CHARGING_INTERVAL;	// 设置轮询间隔
+	mtk_charger_init_timer(info);	// 初始化充电状态轮询定时器，用于周期性地检查充电状态或触发某些动作
 #ifdef CONFIG_PM
 	if (register_pm_notifier(&info->pm_notifier)) {
 		chr_err("%s: register pm failed\n", __func__);
 		return -ENODEV;
 	}
-	info->pm_notifier.notifier_call = charger_pm_event;
+	info->pm_notifier.notifier_call = charger_pm_event;	//当系统进入/退出挂起状态时，会调用 charger_pm_event 回调函数进行处理
 #endif /* CONFIG_PM */
+
+	//初始化 SRCU（Sleepable RCU）通知链，用于在不同模块之间传递事件（例如充电状态变化）
 	srcu_init_notifier_head(&info->evt_nh);
+
+	//在 /sys/class/power_supply/ 下创建一些调试或配置文件节点，供用户空间访问
 	mtk_charger_setup_files(pdev);
+
+	//获取当前系统的热管理模式，用于限制充电电流以避免过热
 	mtk_charger_get_atm_mode(info);
 
+	/*
+	初始化每个充电设置下的电流限制字段（初始为 -1 表示未设置）。
+	启用高压充电（HV Charging）。
+	*/
 	for (i = 0; i < CHGS_SETTING_MAX; i++) {
 		info->chg_data[i].thermal_charging_current_limit = -1;
 		info->chg_data[i].thermal_input_current_limit = -1;
@@ -3838,6 +4197,10 @@ static int mtk_charger_probe(struct platform_device *pdev)
 	}
 	info->enable_hv_charging = true;
 
+	/*
+	定义一个名为 "mtk-master-charger" 的电源供应描述符，并注册到内核。
+	该电源供应将暴露给用户空间，可以查询或设置属性（如电压、电流、状态等）。
+	*/
 	info->psy_desc1.name = "mtk-master-charger";
 	info->psy_desc1.type = POWER_SUPPLY_TYPE_UNKNOWN;
 	info->psy_desc1.properties = charger_psy_properties;
@@ -3918,20 +4281,29 @@ static int mtk_charger_probe(struct platform_device *pdev)
 		chr_err("register psy dvchg2 fail:%ld\n",
 			PTR_ERR(info->psy_dvchg2));
 
-	info->log_level = CHRLOG_ERROR_LEVEL;
+	info->log_level = CHRLOG_ERROR_LEVEL;	//设置默认日志级别为错误级别。
 
-	info->pd_adapter = get_adapter_by_name("pd_adapter");
+	info->pd_adapter = get_adapter_by_name("pd_adapter");	//获取 USB PD 适配器对象，用于支持 PD 快充协议。
 	if (!info->pd_adapter)
 		chr_err("%s: No pd adapter found\n", __func__);
 	else {
+		/*
+		注册适配器通知回调
+		注册一个通知器，当 PD 适配器发生事件（如插入、拔出、协商完成）时会被调用。
+		*/
 		info->pd_nb.notifier_call = notify_adapter_event;
 		register_adapter_device_notifier(info->pd_adapter,
-						 &info->pd_nb);
+						 &info->pd_nb);	
 	}
 
+	/*
+	初始化安全充电控制器（SC），用于监控和限制充电过程。
+	注册算法通知器，用于接收充电算法事件。
+	*/
 	sc_init(&info->sc);
 	info->chg_alg_nb.notifier_call = chg_alg_event;
 
+	//初始化充电指示变量
 	info->fast_charging_indicator = 0;
 	info->enable_meta_current_limit = 1;
 	info->is_charging = false;
@@ -3939,13 +4311,16 @@ static int mtk_charger_probe(struct platform_device *pdev)
 
 	/* 8 = KERNEL_POWER_OFF_CHARGING_BOOT */
 	/* 9 = LOW_POWER_OFF_CHARGING_BOOT */
+	//如果不是关机充电或低电量关机充电模式，则禁用电源路径（防止误充电）。
 	if (info != NULL && info->bootmode != 8 && info->bootmode != 9)
 		mtk_charger_force_disable_power_path(info, CHG1_SETTING, true);
 
+	//注册一个显示通知器，用于在屏幕关闭时执行某些充电优化策略。
 	if (mtk_disp_notifier_register("basic_charger", &basic_charger_lcmoff_fb_notifier)) {
 		pr_err("register basic_charger_lcmoff_fb_notifier\n");
 	}
 	
+	//启动一个内核线程 charger_routine_thread，用于周期性地处理充电逻辑
 	kthread_run(charger_routine_thread, info, "charger_thread");
 	#ifdef CONFIG_SUPPORT_MMI_TEST
 	mmi_pinfo = info;
@@ -3994,7 +4369,7 @@ static struct platform_driver mtk_charger_driver = {
 
 static int __init mtk_charger_init(void)
 {
-	return platform_driver_register(&mtk_charger_driver);
+	return platform_driver_register(&mtk_charger_driver); //注册了一个平台驱动程序
 }
 #if IS_BUILTIN(CONFIG_MTK_CHARGER)
 late_initcall(mtk_charger_init);
@@ -4004,7 +4379,7 @@ module_init(mtk_charger_init);
 
 static void __exit mtk_charger_exit(void)
 {
-	platform_driver_unregister(&mtk_charger_driver);
+	platform_driver_unregister(&mtk_charger_driver);	//注销了平台驱动程序
 }
 module_exit(mtk_charger_exit);
 
