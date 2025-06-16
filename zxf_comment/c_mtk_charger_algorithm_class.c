@@ -294,6 +294,14 @@ static int chg_alg_match_device_by_name(struct device *dev,
 	return strcmp(dev_name(dev), name) == 0;
 }
 
+/*
+功能：根据名称查找并返回充电算法设备指针
+参数：
+name：要查找的充电算法设备名称（如 "pe5"）
+返回值：
+成功：指向struct chg_alg_device的指针
+失败：NULL
+*/
 struct chg_alg_device *get_chg_alg_by_name(const char *name)
 {
 	struct device *dev;

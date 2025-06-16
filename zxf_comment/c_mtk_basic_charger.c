@@ -745,7 +745,7 @@ static int enable_charging(struct mtk_charger *info,
 				continue;
 			chg_alg_stop_algo(alg);	// 停止每个算法
 		}
-		charger_dev_enable(info->chg1_dev, false);
+		charger_dev_enable(info->chg1_dev, false);//调用充电驱动ic中的函数，如sgm41513_charger.c中的.enable函数
 		charger_dev_enable(info->chg2_dev, false);
 		charger_dev_do_event(info->chg1_dev, EVENT_DISCHARGE, 0);	// 触发放电事件
 	} else {

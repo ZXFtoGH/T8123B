@@ -37,7 +37,11 @@ obj-$(CONFIG_EMDOOR_LED) += emdoor_led.o
 
 *
 */
-
+/*
+节点路径：
+    /sys/devices/platform/em_led/em_led_green
+    /sys/devices/platform/em_led/em_led_red
+*/
 
 //kernel-5.10/drivers/misc/mediatek/emdoor_led.c
 #include <dt-bindings/gpio/gpio.h>

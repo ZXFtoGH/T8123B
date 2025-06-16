@@ -303,6 +303,10 @@ int thermal_over39 = 0;
 EXPORT_SYMBOL(thermal_over39);
 
 #ifdef MODULE
+/*
+__chg_cmdline: 一个字符数组，大小为 COMMAND_LINE_SIZE（通常是 2048 或 1024 字节），用于保存启动命令行。
+chg_cmdline: 是指向该数组的指针，方便访问。
+*/
 static char __chg_cmdline[COMMAND_LINE_SIZE];
 static char *chg_cmdline = __chg_cmdline;
 
@@ -311,13 +315,21 @@ const char *chg_get_cmd(void)
 	struct device_node * of_chosen = NULL;
 	char *bootargs = NULL;
 
+	/*
+	如果 __chg_cmdline[0] 不为空（即之前已经读取过），直接返回缓存值，避免重复读取
+	*/
 	if (__chg_cmdline[0] != 0)
 		return chg_cmdline;
 
+	/*
+	使用 of_find_node_by_path("/chosen") 找到设备树中的 /chosen 节点。
+	然后通过 of_get_property(..., "bootargs", ...) 获取其中的 "bootargs" 属性，也就是启动参数字符串。
+	使用 strncpy 将其复制到本地缓存 __chg_cmdline 中。
+	打印日志用于调试。
+	*/
 	of_chosen = of_find_node_by_path("/chosen");
 	if (of_chosen) {
-		bootargs = (char *)of_get_property(
-					of_chosen, "bootargs", NULL);
+		bootargs = (char *)of_get_property(of_chosen, "bootargs", NULL);
 		if (!bootargs)
 			chr_err("%s: failed to get bootargs\n", __func__);
 		else {
@@ -442,22 +454,46 @@ int chr_get_debug_level(void)
 }
 EXPORT_SYMBOL(chr_get_debug_level);
 
+/*
+这个函数主要完成以下工作：
+	记录时间点用于性能分析
+	获取自旋锁保护临界区
+	激活唤醒源防止系统休眠
+	设置线程超时标志
+	唤醒等待队列中的充电器线程
+*/
 void _wake_up_charger(struct mtk_charger *info)
 {
 	unsigned long flags;
 
 	if (info == NULL)
 		return;
+
+	/*
+	ktime_get_boottime() 获取的是基于系统启动的时间戳（不受系统时间修改影响）。
+	这里记录第 2 个时间点，用于后续性能分析。
+	*/
 	info->timer_cb_duration[2] = ktime_get_boottime();
+
+	/*
+	临界区保护：
+		使用spin_lock_irqsave获取自旋锁并禁用中断
+		使用spin_unlock_irqrestore释放锁并恢复中断状态
+	唤醒源管理：
+		检查charger_wakelock是否处于活动状态
+		如果未激活，则调用__pm_stay_awake激活唤醒源，防止系统进入深度睡眠,这样做的目的是确保系统保持运行状态，直到充电线程完成工作。
+		唤醒源的作用是阻止系统进入深度睡眠
+	*/
 	spin_lock_irqsave(&info->slock, flags);
 	info->timer_cb_duration[3] = ktime_get_boottime();
 	if (!info->charger_wakelock->active)
 		__pm_stay_awake(info->charger_wakelock);
 	info->timer_cb_duration[4] = ktime_get_boottime();
 	spin_unlock_irqrestore(&info->slock, flags);
-	info->charger_thread_timeout = true;
+
+	info->charger_thread_timeout = true;	//这个标志通常用于通知充电线程“有新的任务需要处理”，比如检查电池状态、调整充电电流等
 	info->timer_cb_duration[5] = ktime_get_boottime();
-	wake_up_interruptible(&info->wait_que);
+	wake_up_interruptible(&info->wait_que);	//唤醒之前因为等待充电事件而阻塞的进程（通常是充电管理线程）。
 }
 
 bool is_disable_charger(struct mtk_charger *info)
@@ -985,23 +1021,33 @@ static void mtk_charger_start_timer(struct mtk_charger *info)
 	ktime_t ktime, ktime_now;
 	int ret = 0;
 
-	/* If the timer was already set, cancel it */
+	/* If the timer was already set, cancel it
+	使用 alarm_try_to_cancel() 尝试取消已经设置但尚未触发的定时器。
+	如果回调函数正在执行（即定时器正在运行），会返回负数（如 -1）。
+	此时不做任何操作，直接返回，避免重复设置定时器。
+	✅ 这是为了防止多个定时器并发触发，造成资源竞争或逻辑错误。
+	*/
 	ret = alarm_try_to_cancel(&info->charger_timer);
 	if (ret < 0) {
 		chr_err("%s: callback was running, skip timer\n", __func__);
 		return;
 	}
 
-	ktime_now = ktime_get_boottime();
-	time_now = ktime_to_timespec64(ktime_now);
-	end_time.tv_sec = time_now.tv_sec + info->polling_interval;
-	end_time.tv_nsec = time_now.tv_nsec + 0;
-	info->endtime = end_time;
-	ktime = ktime_set(info->endtime.tv_sec, info->endtime.tv_nsec);
+	//计算下一次定时器触发时间
+	ktime_now = ktime_get_boottime();	// 获取当前 boottime 时间（不受系统时间影响）
+	time_now = ktime_to_timespec64(ktime_now);	// 转换为 timespec64 格式
+	end_time.tv_sec = time_now.tv_sec + info->polling_interval;	// 当前秒数加上轮询间隔
+	end_time.tv_nsec = time_now.tv_nsec + 0;	// 纳秒部分保持不变
+	info->endtime = end_time;	// 记录下次唤醒时间
+	ktime = ktime_set(info->endtime.tv_sec, info->endtime.tv_nsec);	// 构造 ktime_t 类型的时间戳
 
+	/*
+	启动计时器
+	当时间到达 ktime 指定的时间点时，就会调用之前注册的回调函数（例如：mtk_charger_alarm_timer_func()）。
+	*/
 	chr_err("%s: alarm timer start:%d, %ld %ld\n", __func__, ret,
 		info->endtime.tv_sec, info->endtime.tv_nsec);
-	alarm_start(&info->charger_timer, ktime);
+	alarm_start(&info->charger_timer, ktime);	//alarm_start() 是 Linux 内核 API，用于真正启动定时器。
 }
 
 static void check_battery_exist(struct mtk_charger *info)
@@ -1751,6 +1797,22 @@ static const struct proc_ops mtk_chg_set_cv_fops = {
 	.proc_write = mtk_chg_set_cv_write,
 };
 
+/*
+参数说明：
+	struct seq_file *m: 用于顺序输出文件内容的结构体；
+	void *data: 可选参数，一般不用；
+代码分析：
+	struct mtk_charger *pinfo = m->private;
+	从 seq_file 的 private 成员中取出之前保存的私有数据指针（通常是 mtk_charger 结构体）。
+	这个指针是在 single_open() 中通过第三个参数传入的，在这里是 PDE_DATA(node)。
+	seq_printf(...)
+	向用户空间输出格式化字符串，类似 printf，但专门用于 seq_file。
+	输出两个字段：
+		pinfo->usb_unlimited: 表示是否启用了 USB 电流无限制模式；
+		pinfo->cmd_discharging: 是否处于命令控制的放电状态。
+返回值：
+	return 0;：表示成功，没有错误。
+*/
 static int mtk_chg_current_cmd_show(struct seq_file *m, void *data)
 {
 	struct mtk_charger *pinfo = m->private;
@@ -1759,18 +1821,47 @@ static int mtk_chg_current_cmd_show(struct seq_file *m, void *data)
 	return 0;
 }
 
+/*
+参数说明：
+	struct inode *node: 指向文件索引节点；
+	struct file *file: 打开的文件对象；
+代码分析：
+	single_open(...) 是内核提供的 API，用于初始化一个只读的、单次读取的 seq_file 接口。
+	第一个参数：file，当前打开的文件；
+	第二个参数：mtk_chg_current_cmd_show，用于输出内容；
+	第三个参数：PDE_DATA(node)，传递给 show 函数的私有数据（通常是设备上下文指针）；
+	PDE_DATA(node) 是从 inode 中提取与该 proc 文件关联的数据，通常在创建 proc 文件时通过 proc_create_data() 设置进去。
+*/
 static int mtk_chg_current_cmd_open(struct inode *node, struct file *file)
 {
 	return single_open(file, mtk_chg_current_cmd_show, PDE_DATA(node));
 }
 
+/*
+返回值类型 ssize_t：表示实际处理的数据长度（或负数错误码）。
+参数说明：
+	struct file *file: 当前文件对象；
+	const char *buffer: 用户空间传入的字符串缓冲区；
+	size_t count: 缓冲区大小；
+	loff_t *data: 文件偏移指针，通常不使用；
+
+这个函数的功能可以概括为：
+	✅ 接收用户空间传来的命令字符串，例如 "1 0" 或 "0 1"
+	✅ 解析成两个整数 current_unlimited 和 cmd_discharging
+	✅ 修改驱动内部状态，并根据指令控制充电或放电动作
+	✅ 提供调试日志支持
+*/
 static ssize_t mtk_chg_current_cmd_write(struct file *file,
 		const char *buffer, size_t count, loff_t *data)
 {
-	int len = 0;
-	char desc[32] = {0};
+	int len = 0;	//实际要复制的字符数
+	char desc[32] = {0};	//临时缓冲区，用来保存从用户空间复制过来的内容；
 	int current_unlimited = 0;
 	int cmd_discharging = 0;
+	/*
+	info: 获取当前设备的私有数据结构体，即 mtk_charger，这是驱动的核心上下文。
+	使用 PDE_DATA(file_inode(file)) 是从 proc 文件中提取之前绑定的私有数据（通常是 mtk_charger * 类型），这个数据在调用 proc_create_data() 时传入。
+	*/
 	struct mtk_charger *info = PDE_DATA(file_inode(file));
 
 	if (!info)
@@ -1778,23 +1869,37 @@ static ssize_t mtk_chg_current_cmd_write(struct file *file,
 	if (count <= 0)
 		return -EINVAL;
 
+	/*
+	从用户空间复制数据
+	复制最多 sizeof(desc) - 1 字节到内核空间缓冲区 desc；
+	避免缓冲区溢出；
+	最后添加字符串结束符 \0；
+	如果复制失败，返回 -EFAULT。
+	*/
 	len = (count < (sizeof(desc) - 1)) ? count : (sizeof(desc) - 1);
 	if (copy_from_user(desc, buffer, len))
 		return -EFAULT;
 
 	desc[len] = '\0';
 
+	/*
+	解析用户输入内容
+	使用 sscanf 从用户输入中提取两个整数：
+		current_unlimited: 控制是否启用 USB 电流无限制；
+		cmd_discharging: 控制是否进入强制放电状态；
+	如果成功读取两个整数，则执行后续逻辑。
+	*/
 	if (sscanf(desc, "%d %d", &current_unlimited, &cmd_discharging) == 2) {
 		info->usb_unlimited = current_unlimited;
-		if (cmd_discharging == 1) {
+		if (cmd_discharging == 1) {	//强制放电 (cmd_discharging == 1)
 			info->cmd_discharging = true;
-			charger_dev_enable(info->chg1_dev, false);
-			charger_dev_do_event(info->chg1_dev,
+			charger_dev_enable(info->chg1_dev, false);	// 关闭充电，调用充电驱动ic中的函数，如sgm41513_charger.c中的.enable函数
+			charger_dev_do_event(info->chg1_dev,	// 触发放电事件
 					EVENT_DISCHARGE, 0);
-		} else if (cmd_discharging == 0) {
+		} else if (cmd_discharging == 0) {	//退出放电 (cmd_discharging == 0)
 			info->cmd_discharging = false;
-			charger_dev_enable(info->chg1_dev, true);
-			charger_dev_do_event(info->chg1_dev,
+			charger_dev_enable(info->chg1_dev, true);	// 重新启用充电
+			charger_dev_do_event(info->chg1_dev,	// 触发再充电事件
 					EVENT_RECHARGE, 0);
 		}
 
@@ -1807,6 +1912,29 @@ static ssize_t mtk_chg_current_cmd_write(struct file *file,
 	return count;
 }
 
+/*
+这行代码定义了一个 /proc 文件的操作接口表，它把文件的打开、读取、写入等操作与具体的函数绑定起来，
+使得用户可以通过简单的文件操作来查看和控制底层驱动的行为。
+
+操作	对应函数	功能说明
+open	mtk_chg_current_cmd_open	初始化读取上下文，绑定 show 函数
+read	seq_read	将数据发送给用户空间
+lseek	seq_lseek	支持文件偏移跳转
+release	single_release	清理资源
+write	mtk_chg_current_cmd_write	接收用户输入并更新驱动行为
+
+如何注册这个 proc 文件？
+	你可能会看到类似如下代码：
+	proc_create("mtk_charge_cmd", 0644, NULL, &mtk_chg_current_cmd_fops);
+	或者带私有数据传递的版本：
+	proc_create_data("mtk_charge_cmd", 0644, NULL, &mtk_chg_current_cmd_fops, info);
+
+	"mtk_charge_cmd"：创建的文件名；
+	0644：权限位，表示所有用户可读写；
+	NULL：放在 /proc 根目录下；
+	&mtk_chg_current_cmd_fops：指定的操作函数；
+	info：传给 PDE_DATA(node) 的私有数据（通常是 mtk_charger * 结构体）；
+*/
 static const struct proc_ops mtk_chg_current_cmd_fops = {
 	.proc_open = mtk_chg_current_cmd_open,
 	.proc_read = seq_read,
@@ -1850,6 +1978,11 @@ static ssize_t mtk_chg_en_power_path_write(struct file *file,
 
 	desc[len] = '\0';
 
+	/*
+	使用 kstrtou32() 将用户输入的字符串转换为一个 32 位无符号整数；
+	第二个参数 10 表示以十进制解析；
+	成功时返回 0，并将结果保存在 enable 中。
+	*/
 	ret = kstrtou32(desc, 10, &enable);
 	if (ret == 0) {
 		charger_dev_enable_powerpath(info->chg1_dev, enable);
@@ -1925,6 +2058,15 @@ static ssize_t mtk_chg_en_safety_timer_write(struct file *file,
 	return count;
 }
 
+/*
+这段代码实现了一个 /proc 接口，使得用户空间可以通过简单的文件读写操作，查看和控制充电器的安全定时器功能，同时兼顾了硬件和软件层面的控制逻辑。
+五、什么是“安全定时器”？
+在充电系统中，“安全定时器”是一个关键的安全机制：
+它会在充电开始后启动一个定时器；
+如果充电时间超过设定值仍未完成（如电池损坏、无法充满），就会强制停止充电；
+防止过充、电池损坏、甚至起火等危险情况发生；
+可以是硬件定时器（由充电 IC 控制），也可以是软件模拟的定时器。
+*/
 static const struct proc_ops mtk_chg_en_safety_timer_fops = {
 	.proc_open = mtk_chg_en_safety_timer_open,
 	.proc_read = seq_read,
@@ -3416,10 +3558,24 @@ static int charger_pm_event(struct notifier_block *notifier,
 
 	switch (pm_event) {
 	case PM_SUSPEND_PREPARE:
+		/*
+		当系统准备进入挂起状态（suspend）时，设置 is_suspend 为 true。
+		输出调试信息。
+		*/
 		info->is_suspend = true;
 		chr_debug("%s: enter PM_SUSPEND_PREPARE\n", __func__);
 		break;
 	case PM_POST_SUSPEND:
+		/*
+		当系统从挂起状态恢复后（PM_POST_SUSPEND），将 info->is_suspend 设置为 false。
+		打印调试信息，表示进入了 PM_POST_SUSPEND 状态。
+		获取当前的启动时间戳 (ktime_now) 并将其转换为 timespec64 格式 (now)。
+		检查当前时间是否大于等于 info->endtime，并且 info->endtime 不为零：
+			如果条件满足，打印错误信息，表示闹钟超时并唤醒充电器（则说明定时唤醒已经完成）。
+			调用 __pm_relax 函数释放充电器的唤醒锁（防止系统一直被锁住不休眠）。
+			将 info->endtime 设为零。
+			调用 _wake_up_charger 函数唤醒充电器。
+		*/
 		info->is_suspend = false;
 		chr_debug("%s: enter PM_POST_SUSPEND\n", __func__);
 		ktime_now = ktime_get_boottime();
@@ -3443,14 +3599,42 @@ static int charger_pm_event(struct notifier_block *notifier,
 }
 #endif /* CONFIG_PM */
 
+/*
+它的核心功能是：
+	判断系统是否处于 挂起（suspend）状态
+	如果不是挂起状态，就调用 _wake_up_charger() 唤醒充电逻辑
+	如果是挂起状态，则通过 __pm_stay_awake() 防止系统进入更深的睡眠状态
+	还有性能监控和日志记录功能
+
+static enum alarmtimer_restart mtk_charger_alarm_timer_func(struct alarm *alarm, ktime_t now)
+	static：表示该函数作用域仅限于当前源文件。
+	enum alarmtimer_restart：返回值类型，表示定时器是否需要重启。
+	mtk_charger_alarm_timer_func：函数名，是 alarm_init() 时注册的定时器回调函数。
+	struct alarm *alarm：指向触发本次回调的定时器结构体。
+	ktime_t now：表示当前时间戳（由内核提供），通常为 ALARM_BOOTTIME 类型。
+*/
 static enum alarmtimer_restart
 	mtk_charger_alarm_timer_func(struct alarm *alarm, ktime_t now)
 {
-	struct mtk_charger *info =
-	container_of(alarm, struct mtk_charger, charger_timer);
-	ktime_t *time_p = info->timer_cb_duration;
+	struct mtk_charger *info = container_of(alarm, struct mtk_charger, charger_timer);
 
+	/*
+	这里 timer_cb_duration 是一个数组，用来记录整个回调函数执行过程中的多个关键时间点，用于后续性能分析或调试。
+	ktime_get_boottime() 获取的是基于系统启动的时间戳（不受系统时间修改影响）
+	*/
+	ktime_t *time_p = info->timer_cb_duration;
 	info->timer_cb_duration[0] = ktime_get_boottime();
+
+	
+	/*
+	//判断是否处于 suspend 状态并唤醒系统
+	1. 如果没有进入挂起状态（正常运行）：
+		调用 _wake_up_charger(info) 触发一次充电状态更新
+		在不同阶段记录时间戳，便于性能分析
+	2. 如果进入了挂起状态（低功耗休眠）：
+		使用 __pm_stay_awake() 防止系统继续休眠，通知电源管理子系统“我还有事要做”
+		charger_wakelock 是一个唤醒锁（wakelock），防止系统过早进入深度睡眠
+	*/
 	if (info->is_suspend == false) {
 		chr_debug("%s: not suspend, wake up charger\n", __func__);
 		info->timer_cb_duration[1] = ktime_get_boottime();
@@ -3461,8 +3645,13 @@ static enum alarmtimer_restart
 		__pm_stay_awake(info->charger_wakelock);
 	}
 
+	/*
+	计算从回调开始到结束所花的时间（单位：微秒）
+	如果总时间超过 5000 微秒（即 5ms），就打印各个阶段的耗时
+	chr_err() 是自定义的日志宏，用于输出错误/调试信息
+	这个机制有助于调试充电线程是否响应太慢、是否存在卡顿等问题。
+	*/
 	info->timer_cb_duration[7] = ktime_get_boottime();
-
 	if (ktime_us_delta(time_p[7], time_p[0]) > 5000)
 		chr_err("%s: delta_t: %ld %ld %ld %ld %ld %ld %ld (%ld)\n",
 			__func__,
@@ -3475,21 +3664,61 @@ static enum alarmtimer_restart
 			ktime_us_delta(time_p[7], time_p[6]),
 			ktime_us_delta(time_p[7], time_p[0]));
 
-	return ALARMTIMER_NORESTART;
+	return ALARMTIMER_NORESTART;	//当前定时器不重启，只触发一次
 }
 
+/*
+这是一段用于 初始化并启动一个高精度定时器 的函数，目的是为了：
+	在系统运行期间周期性地检查充电状态；
+	即使在系统进入 suspend 状态后也能准确唤醒并继续监控；
+	提供更稳定、更精确的定时机制以适应现代电源管理需求。
+
+alarm_init() 初始化定时器
+	&info->charger_timer	要初始化的 alarm 类型定时器结构体
+	ALARM_BOOTTIME	定时器使用的时钟类型，表示使用系统启动时间（不受 RTC 时间更改影响）
+	mtk_charger_alarm_timer_func	定时器到期后要执行的回调函数
+
+2. 定时器类型 (ALARM_BOOTTIME)
+	定时器类型决定了计时基准：
+	ALARM_BOOTTIME：基于系统启动时间
+		系统休眠时暂停计时
+		适合需要在系统唤醒后继续执行的任务
+	ALARM_REALTIME：基于实时时钟
+		系统休眠时继续计时
+		适合需要跨休眠周期执行的任务
+	ALARM_BOOTTIME_ALARM/ALARM_REALTIME_ALARM：可唤醒系统的版本
+*/
 static void mtk_charger_init_timer(struct mtk_charger *info)
 {
-	alarm_init(&info->charger_timer, ALARM_BOOTTIME,
-			mtk_charger_alarm_timer_func);
+	alarm_init(&info->charger_timer, ALARM_BOOTTIME, mtk_charger_alarm_timer_func);
 	mtk_charger_start_timer(info);
 
 }
 
+/*
+创建的文件路径：
+Lecoo-P122W:/sys/devices/platform/charger # ls
+ADC_Charger_Voltage      Thermal_throttle           enable_sc              pd_type        ship_mode
+ADC_Charging_Current     charger_log_level          fast_chg_indicator     power          subsystem
+BatteryNotify            chgtmp_enable              input_current          power_supply   sw_jeita
+Charging_mode            chr_type                   mmi_charge_enable      sc_etime       sw_ovp_threshold
+High_voltage_chg_enable  driver                     mmi_charge_enable_all  sc_ibat_limit  uevent
+Pump_Express             driver_override            modalias               sc_stime       vbat_mon
+Rust_detect              enable_meta_current_limit  of_node                sc_tuisoc
+*/
 static int mtk_charger_setup_files(struct platform_device *pdev)
 {
+	/*
+	ret：保存函数调用的返回值，用于出错处理。
+	battery_dir 和 entry：虽然在这里声明了，但没有实际使用，可能是预留或者被注释掉了。
+	info：通过 platform_get_drvdata(pdev) 获取之前保存在 platform device 中的私有数据指针，通常是 struct mtk_charger 类型，代表充电器驱动的核心结构体。
+	*/
 	int ret = 0;
 	struct proc_dir_entry *battery_dir = NULL, *entry = NULL;
+	/*
+	从 platform device 中取出之前通过 platform_set_drvdata(pdev, info) 保存的私有数据指针，通常是驱动的核心结构体 mtk_charger，以便后续访问设备的状态、配置、资源等。
+	这是 Linux 内核平台设备驱动开发中获取设备上下文的标准方式。
+	*/
 	struct mtk_charger *info = platform_get_drvdata(pdev);
 
 	ret = device_create_file(&(pdev->dev), &dev_attr_sw_jeita);
@@ -3598,12 +3827,26 @@ static int mtk_charger_setup_files(struct platform_device *pdev)
 	if (ret)
 		goto _out;
 	
+	//在 /proc 目录下创建一个名为mtk_battery_cmd的子目录
 	battery_dir = proc_mkdir("mtk_battery_cmd", NULL);
 	if (!battery_dir) {
 		chr_err("%s: mkdir /proc/mtk_battery_cmd failed\n", __func__);
 		return -ENOMEM;
 	}
 
+	// 在/proc/mtk_battery_cmd目录下创建current_cmd文件
+	/*
+	功能：创建一个 /proc 文件并关联操作函数
+	参数：
+		"current_cmd"：文件名
+		0644：文件权限（用户读写，组读，其他读）
+		battery_dir：父目录（即上面创建的mtk_battery_cmd）
+		&mtk_chg_current_cmd_fops：文件操作结构体
+		info：传递给操作函数的私有数据
+	返回值：
+		成功：指向struct proc_dir_entry的指针
+		失败：NULL
+	*/
 	entry = proc_create_data("current_cmd", 0644, battery_dir,
 			&mtk_chg_current_cmd_fops, info);
 	if (!entry) {
@@ -3631,12 +3874,26 @@ static int mtk_charger_setup_files(struct platform_device *pdev)
 
 	return 0;
 
+/*
+功能：删除 /proc 文件系统中的一个子目录及其所有内容
+参数：
+	name：要删除的目录名称（如 "mtk_battery_cmd"）
+	parent：父目录指针（NULL 表示 /proc 根目录）
+特点：递归删除目录下的所有文件和子目录，确保资源完全释放
+
+与 proc_remove 的区别
+函数	  						作用			适用场景
+remove_proc_subtree	递归删除目录及其所有内容	删除整个目录树
+proc_remove			删除单个文件或目录			删除单个文件或空目录
+*/
 fail_procfs:
 	remove_proc_subtree("mtk_battery_cmd", NULL);
+
 _out:
 	return ret;
 }
 
+//有相识函数is_gms_test_by_serialno，有详细解释
 void mtk_charger_get_atm_mode(struct mtk_charger *info)
 {
 	char atm_str[64] = {0};
@@ -3689,6 +3946,10 @@ static enum power_supply_property charger_psy_properties[] = {
 	POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
 };
 
+/*
+当用户空间（如 /sys/class/power_supply/mtk-master-charger/xxx）或内核其他模块访问该电源设备的某个属性时，这个函数会被调用以返回当前值。
+
+*/
 static int psy_charger_get_property(struct power_supply *psy,
 	enum power_supply_property psp, union power_supply_propval *val)
 {
@@ -3698,6 +3959,7 @@ static int psy_charger_get_property(struct power_supply *psy,
 	int ret = 0;
 	struct chg_alg_device *alg = NULL;
 
+	//power_supply_get_drvdata(psy)：从 psy 对象中取出之前注册时传入的私有数据（通常是 mtk_charger * 类型）
 	info = (struct mtk_charger *)power_supply_get_drvdata(psy);
 	if (info == NULL) {
 		chr_err("%s: get info failed\n", __func__);
@@ -3705,11 +3967,10 @@ static int psy_charger_get_property(struct power_supply *psy,
 	}
 	chr_debug("%s psp:%d\n", __func__, psp);
 
-	if (info->psy1 != NULL &&
-		info->psy1 == psy)
+	//判断访问的是哪一个电源节点（主充、副充、直充等）
+	if (info->psy1 != NULL && info->psy1 == psy)
 		chg = info->chg1_dev;
-	else if (info->psy2 != NULL &&
-		info->psy2 == psy)
+	else if (info->psy2 != NULL && info->psy2 == psy)
 		chg = info->chg2_dev;
 	else if (info->psy_dvchg1 != NULL && info->psy_dvchg1 == psy)
 		chg = info->dvchg1_dev;
@@ -3722,7 +3983,7 @@ static int psy_charger_get_property(struct power_supply *psy,
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_ONLINE:
-		if (chg == info->dvchg1_dev) {
+		if (chg == info->dvchg1_dev) {	//如果是直充设备（dvchg1），检查是否 PE5 快充算法正在运行；
 			val->intval = false;
 			alg = get_chg_alg_by_name("pe5");
 			if (alg == NULL)
@@ -3751,11 +4012,9 @@ static int psy_charger_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_TEMP:
 		if (chg == info->chg1_dev)
-			val->intval =
-				info->chg_data[CHG1_SETTING].junction_temp_max * 10;
+			val->intval = info->chg_data[CHG1_SETTING].junction_temp_max * 10;
 		else if (chg == info->chg2_dev)
-			val->intval =
-				info->chg_data[CHG2_SETTING].junction_temp_max * 10;
+			val->intval = info->chg_data[CHG2_SETTING].junction_temp_max * 10;
 		else if (chg == info->dvchg1_dev) {
 			pdata = &info->chg_data[DVCHG1_SETTING];
 			val->intval = pdata->junction_temp_max;
@@ -3871,12 +4130,13 @@ out:
 	return ret;
 }
 
+//这个函数实现了对充电器电源设备各种属性的写入支持，允许用户空间动态控制充电行为（如限流、限压、关闭路径等），是实现智能充电管理的重要组成部分。
 int psy_charger_set_property(struct power_supply *psy,
 			enum power_supply_property psp,
 			const union power_supply_propval *val)
 {
 	struct mtk_charger *info;
-	int idx;
+	int idx;	//根据当前访问的是哪个电源节点（主充、副充、直充等），确定对应的配置索引 idx
 
 	chr_err("%s: prop:%d %d\n", __func__, psp, val->intval);
 
@@ -3887,11 +4147,9 @@ int psy_charger_set_property(struct power_supply *psy,
 		return -EINVAL;
 	}
 
-	if (info->psy1 != NULL &&
-		info->psy1 == psy)
+	if (info->psy1 != NULL && info->psy1 == psy)
 		idx = CHG1_SETTING;
-	else if (info->psy2 != NULL &&
-		info->psy2 == psy)
+	else if (info->psy2 != NULL && info->psy2 == psy)
 		idx = CHG2_SETTING;
 	else if (info->psy_dvchg1 != NULL && info->psy_dvchg1 == psy)
 		idx = DVCHG1_SETTING;
@@ -3922,8 +4180,7 @@ int psy_charger_set_property(struct power_supply *psy,
 		info->chg_data[CHG2_SETTING].thermal_charging_current_limit = -1;
 		break;
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
-		info->chg_data[idx].thermal_input_current_limit =
-			val->intval;
+		info->chg_data[idx].thermal_input_current_limit = val->intval;
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT:
 		if (val->intval > 0)
@@ -3940,6 +4197,10 @@ int psy_charger_set_property(struct power_supply *psy,
 	default:
 		return -EINVAL;
 	}
+	/*
+	充电状态变化后，需要唤醒充电线程重新计算和执行；
+	_wake_up_charger() 会触发充电策略重新运行（比如调整电流、电压、切换路径等）。
+	*/
 	_wake_up_charger(info);
 
 	return 0;
@@ -4144,12 +4405,25 @@ static int mtk_charger_probe(struct platform_device *pdev)
 	if (!info)
 		return -ENOMEM;
 
-	platform_set_drvdata(pdev, info);	// 将 info 绑定到平台设备，便于后续访问
+	platform_set_drvdata(pdev, info);	// 将 info 绑定到平台设备，便于后续访问，访问方式：struct mtk_charger *info = platform_get_drvdata(pdev);
 	info->pdev = pdev;	// 保存平台设备指针pdev 到结构体中
 
 	mtk_charger_parse_dt(info, &pdev->dev);	// 解析设备树中的充电参数,填充到 info 结构体中
 
+	/*
 	//初始化多个互斥锁，用于保护并发访问共享资源（如充电状态、PD 协议处理、电源路径等）
+	并行充电路径（Parallel Charging）是什么？
+		并行充电是指使用多个充电通道（例如主充 + 辅充）同时为电池充电，以降低单个充电路径上的温度，提升充电效率。
+		在 MediaTek 的设计中，通常有：
+		CHG1: 主充电器
+		CHG2: 副充电器（可能是一个独立的充电 IC）
+
+	应用场景举例
+		用户拔掉充电线 → 获取 cable_out_lock，安全更新线缆状态；
+		切换 PD 快充协议 → 获取 pd_lock，防止协议冲突；
+		调整并行充电电流分配 → 获取对应的 pp_lock[i]，防止并发访问错误；
+		调试时临时关闭某一路充电 → 设置 force_disable_pp[i] = true；
+	*/
 	mutex_init(&info->cable_out_lock);	// 充电线缆状态锁
 	mutex_init(&info->charger_lock);	// 充电状态锁
 	mutex_init(&info->pd_lock);	// PD（Power Delivery）协议锁
@@ -4160,16 +4434,45 @@ static int mtk_charger_probe(struct platform_device *pdev)
 	}
 	
 	//初始化唤醒锁，防止在充电过程中系统进入休眠。
-	name = devm_kasprintf(&pdev->dev, GFP_KERNEL, "%s",
-		"charger suspend wakelock");
-	info->charger_wakelock =
-		wakeup_source_register(NULL, name);	// 注册唤醒锁
+	/*
+		函数名						功能
+	wakeup_source_init()	初始化一个唤醒源结构体
+	wakeup_source_register()	注册唤醒源到系统
+	wakeup_source_unregister()	注销唤醒源
+	__pm_stay_awake()	激活唤醒源（阻止系统休眠）
+	__pm_relax()	解除唤醒源
+	__pm_wakeup_event()	主动触发一个唤醒事件
+	*/
+	name = devm_kasprintf(&pdev->dev, GFP_KERNEL, "%s", "charger suspend wakelock");	//动态分配内存并格式化字符串 "charger suspend wakelock"
+	info->charger_wakelock = wakeup_source_register(NULL, name);	// 注册一个唤醒源，用于跟踪设备活动并阻止系统进入深度睡眠
 	spin_lock_init(&info->slock);	// 自旋锁（用于快速原子操作）
 
+	/*
+	1. init_waitqueue_head(&info->wait_que);
+		含义：
+			这是初始化一个 等待队列头（wait queue head） 的函数调用。
+		函数原型：
+			void init_waitqueue_head(wait_queue_head_t *q);
+		数据结构说明：
+			wait_queue_head_t 是 Linux 内核中用于实现 进程等待机制 的结构体。
+			它通常用于驱动程序中，当某个事件未发生时，让当前进程进入睡眠状态；等事件发生后，再由其他线程或中断唤醒它。
+		应用场景举例：
+			在充电管理中，可能有一个内核线程负责周期性地检查电池状态。如果暂时不需要处理，可以将其放入等待队列中休眠，直到定时器触发或中断到来时唤醒它。
+			wait_event_interruptible(info->wait_que, condition);
+			这会让当前进程等待直到 condition 成立或者被中断。
+	*/
+	/*
+	这三行代码一起完成了一个 基于定时器和等待队列的轮询机制，用于监控充电状态：
+	行号	代码	作用
+	1	init_waitqueue_head(&info->wait_que);	初始化等待队列头，用于线程休眠/唤醒
+	2	info->polling_interval = CHARGING_INTERVAL;	设置轮询间隔（如30秒）
+	3	mtk_charger_init_timer(info);	初始化定时器，到期时唤醒等待队列，并再次启动自己
+	*/
 	init_waitqueue_head(&info->wait_que);	// 初始化等待队列（用于线程休眠等待事件）
 	info->polling_interval = CHARGING_INTERVAL;	// 设置轮询间隔
 	mtk_charger_init_timer(info);	// 初始化充电状态轮询定时器，用于周期性地检查充电状态或触发某些动作
-#ifdef CONFIG_PM
+
+#ifdef CONFIG_PM	//解析在md文档搜索：回调函数
 	if (register_pm_notifier(&info->pm_notifier)) {
 		chr_err("%s: register pm failed\n", __func__);
 		return -ENODEV;
@@ -4178,6 +4481,26 @@ static int mtk_charger_probe(struct platform_device *pdev)
 #endif /* CONFIG_PM */
 
 	//初始化 SRCU（Sleepable RCU）通知链，用于在不同模块之间传递事件（例如充电状态变化）
+	/*
+	SRCU (Sleepable Read-Copy Update) 
+	函数原型与参数
+		void srcu_init_notifier_head(struct srcu_notifier_head *nh);
+		参数：指向 srcu_notifier_head 结构体的指针
+		功能：初始化一个可睡眠的通知器链表头
+
+	为什么使用 SRCU 而不是普通通知链？
+	Linux 提供了多种通知链实现方式：
+		类型	宏/函数	     是否允许回调函数睡眠
+		原子通知链	atomic_notifier_*	❌ 不允许
+		可阻塞通知链	blocking_notifier_*	✅ 允许
+		SRCU 通知链	srcu_notifier_*	✅ 允许，适合多线程并发环境
+	
+	SRCU 的优势：
+		支持回调函数睡眠；
+		多读者安全；
+		更适合在现代多核系统中使用；
+		比 blocking_notifier 更轻量、更高效。
+	*/
 	srcu_init_notifier_head(&info->evt_nh);
 
 	//在 /sys/class/power_supply/ 下创建一些调试或配置文件节点，供用户空间访问
@@ -4200,23 +4523,40 @@ static int mtk_charger_probe(struct platform_device *pdev)
 	/*
 	定义一个名为 "mtk-master-charger" 的电源供应描述符，并注册到内核。
 	该电源供应将暴露给用户空间，可以查询或设置属性（如电压、电流、状态等）。
+	路径：
+	/sys/class/power_supply/mtk-master-charger
+	t7820_l40mme_T1036_64:/sys/class/power_supply/mtk-master-charger # ls
+	constant_charge_current_max  input_current_limit  power    subsystem  type    voltage_max  wakeup27
+	device                       online               present  temp       uevent  voltage_now
 	*/
 	info->psy_desc1.name = "mtk-master-charger";
 	info->psy_desc1.type = POWER_SUPPLY_TYPE_UNKNOWN;
-	info->psy_desc1.properties = charger_psy_properties;
+	info->psy_desc1.properties = charger_psy_properties;	//支持的属性列表（上面那个数组）
 	info->psy_desc1.num_properties = ARRAY_SIZE(charger_psy_properties);
-	info->psy_desc1.get_property = psy_charger_get_property;
-	info->psy_desc1.set_property = psy_charger_set_property;
+	info->psy_desc1.get_property = psy_charger_get_property;	//获取属性值的回调函数
+	info->psy_desc1.set_property = psy_charger_set_property;	//设置属性值的回调函数
 	info->psy_desc1.property_is_writeable =
-			psy_charger_property_is_writeable;
+			psy_charger_property_is_writeable;					//判断某个属性是否可写
 	info->psy_desc1.external_power_changed =
-		mtk_charger_external_power_changed;
-	info->psy_cfg1.drv_data = info;
-	info->psy_cfg1.supplied_to = mtk_charger_supplied_to;
-	info->psy_cfg1.num_supplicants = ARRAY_SIZE(mtk_charger_supplied_to);
+		mtk_charger_external_power_changed;						//外部电源状态变化时的通知回调
+	info->psy_cfg1.drv_data = info;			//私有数据指针，传递给 get_property 和 set_property 回调函数
+	info->psy_cfg1.supplied_to = mtk_charger_supplied_to;//这个电源能供电给哪些其他电源设备（字符串数组）
+	info->psy_cfg1.num_supplicants = ARRAY_SIZE(mtk_charger_supplied_to);	//上面数组的元素数量
+	/*
+	注册电源设备：power_supply_register()
+	调用内核 API 注册一个电源设备。
+		成功后会在 /sys/class/power_supply/mtk-master-charger/ 下创建对应的节点；
+		用户空间可以通过 cat 或 echo 访问这些属性；
+		返回值 psy1 是注册成功的 struct power_supply * 指针。
+	*/
 	info->psy1 = power_supply_register(&pdev->dev, &info->psy_desc1,
 			&info->psy_cfg1);
 
+	/*
+	从设备树中获取其他电源设备：
+	info->chg_psy	"charger" 节点	主要的充电 IC 设备
+	info->bat_psy	"gauge" 节点	电池电量计设备（记录电量、温度等）
+	*/
 	info->chg_psy = devm_power_supply_get_by_phandle(&pdev->dev,
 		"charger");
 	if (IS_ERR_OR_NULL(info->chg_psy))
@@ -4230,6 +4570,8 @@ static int mtk_charger_probe(struct platform_device *pdev)
 	if (IS_ERR(info->psy1))
 		chr_err("register psy1 fail:%ld\n",
 			PTR_ERR(info->psy1));
+
+
 
 	info->psy_desc2.name = "mtk-slave-charger";
 	info->psy_desc2.type = POWER_SUPPLY_TYPE_UNKNOWN;
