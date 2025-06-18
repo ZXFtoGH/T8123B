@@ -1260,12 +1260,32 @@ void do_sw_jeita_state_machine(struct mtk_charger *info)
 		sw_jeita->cv);
 }
 
+/*
+当充电状态发生变化时（如检测到水、连接/断开适配器等），调用此函数，
+通过 uevent 向用户空间发送一个 "CHGSTAT=1" 的环境变量事件，以通知上层系统有充电相关状态更新
+*/
 static int mtk_chgstat_notify(struct mtk_charger *info)
 {
 	int ret = 0;
+	/*
+	定义了一个环境变量数组 env，其中只有一个键值对："CHGSTAT=1"；
+	NULL 表示环境变量数组结束；
+	用户空间可以通过监听这个环境变量来得知充电状态发生了变化。
+	*/
 	char *env[2] = { "CHGSTAT=1", NULL };
 
 	chr_err("%s: 0x%x\n", __func__, info->notify_code);
+	/*
+	参数解释：
+		参数	说明
+		&info->pdev->dev.kobj	设备对应的 kobject，表示这个 uevent 属于哪个设备
+		KOBJ_CHANGE	表示这是一个“属性改变”的事件
+		env	要发送的环境变量数组
+	功能说明：
+		kobject_uevent_env() 是内核提供的函数，用于向用户空间发送 uevent；
+		在本例中，它会触发一个 change 类型的 uevent，并附带 "CHGSTAT=1" 的环境变量；
+		用户空间的 uevent 监听者（如 ueventd 或 systemd）可以捕获并处理这个事件。
+	*/
 	ret = kobject_uevent_env(&info->pdev->dev.kobj, KOBJ_CHANGE, env);
 	if (ret)
 		chr_err("%s: kobject_uevent_fail, ret=%d", __func__, ret);
@@ -2120,28 +2140,68 @@ char *sc_solToStr(int s)
 	}
 }
 
+/*
+该函数的核心逻辑是：
+	根据用户设置的目标电量（如 80%）、目标时间（如 30 分钟后充满）；
+	结合当前充电状态（如电池电量、充电电流）；
+	计算出当前是否需要调整充电电流或停止充电；
+	以确保在指定时间内刚好达到目标电量；
+	主要用于实现 “定时充满”、“灭屏降流”、“健康充电” 等功能。
+*/
 int smart_charging(struct mtk_charger *info)
 {
 	int time_to_target = 0;
 	int time_to_full_default_current = -1;
 	int time_to_full_default_current_limit = -1;
 	int ret_value = SC_KEEP;
+	/*
+	获取当前系统时间；
+	计算从现在到目标结束时间还剩多少秒；
+	*/
 	int sc_real_time = sc_get_sys_time();
 	int sc_left_time = sc_get_left_time(info->sc.start_time, info->sc.end_time, sc_real_time);
+
+	/*
+	获取当前 UI 显示电量百分比（乘以 100 是为了保持精度）；
+	获取当前充电电流；
+	*/
 	int sc_battery_percentage = get_uisoc(info) * 100;
 	int sc_charger_current = get_battery_current(info);
 
+	/*
+	left_time_for_cv 表示进入恒压阶段前的预留时间；
+	time_to_target 表示实际可用于恒流充电的时间；
+	*/
 	time_to_target = sc_left_time - info->sc.left_time_for_cv;
 
+	/*
+	判断是否忽略本次处理
+
+	如果智能充电未启用；
+	如果已过目标时间；
+	如果剩余时间不足以完成恒流充电；
+	如果当前没有充电电流且上次不是禁用状态；
+	→ 则不进行智能调节，直接跳过。
+	*/
 	if (info->sc.enable == false || sc_left_time <= 0
 		|| sc_left_time < info->sc.left_time_for_cv
 		|| (sc_charger_current <= 0 && info->sc.last_solution != SC_DISABLE))
 		ret_value = SC_IGNORE;
 	else {
+		/*
+		如果当前电量已经高于目标电量；
+		并且还有时间余量，则建议关闭充电；
+		*/
 		if (sc_battery_percentage > info->sc.target_percentage * 100) {
 			if (time_to_target > 0)
 				ret_value = SC_DISABLE;
 		} else {
+			/*
+			计算当前充电速度下，从当前电量充到目标电量所需的时间；
+			battery_size 是电池容量（mAh）；
+			3600 是将小时转换为秒；
+			10000 是因为电量是以 x10000 形式存储的；
+			*/
 			if (sc_charger_current != 0)
 				time_to_full_default_current =
 					info->sc.battery_size * 3600 / 10000 *
@@ -2158,6 +2218,12 @@ int smart_charging(struct mtk_charger *info)
 				sc_charger_current,
 				info->sc.current_limit);
 
+			/*
+			如果当前充电速度太快，预计会提前充满；
+			且设置了电流限制；
+			且当前电流超过了限制；
+			→ 进一步判断是否需要降流：
+			*/
 			if (time_to_full_default_current < time_to_target &&
 				info->sc.current_limit != -1 &&
 				sc_charger_current > info->sc.current_limit) {
@@ -2172,17 +2238,28 @@ int smart_charging(struct mtk_charger *info)
 					sc_battery_percentage,
 					info->sc.current_limit);
 
+				/*
+				使用限制电流重新计算充满时间；
+				如果仍然快于目标时间，则决定降流；
+				*/
 				if (time_to_full_default_current_limit < time_to_target &&
 					sc_charger_current > info->sc.current_limit)
 					ret_value = SC_REDUCE;
 			}
+		}
 	}
-}
+	/*
+	更新最后决策并控制充电器
+
+	保存当前决策；
+	设置是否禁用充电器；
+	*/
 	info->sc.last_solution = ret_value;
 	if (info->sc.last_solution == SC_DISABLE)
 		info->sc.disable_charger = true;
 	else
 		info->sc.disable_charger = false;
+	
 	chr_err("[sc]disable_charger: %d\n", info->sc.disable_charger);
 	chr_err("[sc1]en:%d t:%d,%d,%d,%d t:%d,%d,%d,%d c:%d,%d ibus:%d uisoc: %d,%d s:%d ans:%s\n",
 		info->sc.enable, info->sc.start_time, info->sc.end_time,
@@ -2247,12 +2324,13 @@ void sc_select_charging_current(struct mtk_charger *info, struct charger_data *p
 	}
 }
 
+//对一个 smartcharging 控制结构进行初始化，设置默认参数值，为后续的智能充电逻辑做准备。
 void sc_init(struct smartcharging *sc)
 {
 	sc->enable = false;
 	sc->battery_size = 3000;
 	sc->start_time = 0;
-	sc->end_time = 80000;
+	sc->end_time = 80000;	//设置智能充电逻辑的结束时间为 80000 秒（约 22 小时）；
 	sc->current_limit = 2000;
 	sc->target_percentage = 80;
 	sc->left_time_for_cv = 3600;
@@ -3053,6 +3131,15 @@ stop_charging:
 	info->can_charging = charging;
 }
 
+/*
+该函数的主要作用是：
+	获取主充电器设备（primary_chg）；
+	根据支持的协议（如 PE5、PE4.5、PD、PE2 等）加载对应的充电算法；
+	初始化这些算法，并注册它们的事件通知回调；
+	如果启用了双充或分压器架构，还会获取副充电器设备（secondary_chg 或 divider chg）；
+	注册充电器设备的事件回调函数（如插拔适配器事件）；
+	它是充电流程开始前必须完成的重要初始化步骤。
+*/
 static bool charger_init_algo(struct mtk_charger *info)
 {
 	struct chg_alg_device *alg;
@@ -3062,11 +3149,16 @@ static bool charger_init_algo(struct mtk_charger *info)
 	if (info->chg1_dev)
 		chr_err("%s, Found primary charger\n", __func__);
 	else {
-		chr_err("%s, *** Error : can't find primary charger ***\n"
-			, __func__);
+		chr_err("%s, *** Error : can't find primary charger ***\n", __func__);
 		return false;
 	}
 
+	/*
+	每加载一个算法都会做以下操作：
+	设置算法的配置参数和 ID；
+	调用 chg_alg_init_algo(alg) 进行初始化；
+	调用 register_chg_alg_notifier(alg, &info->chg_alg_nb) 注册算法的事件回调；
+	*/
 	alg = get_chg_alg_by_name("pe5");
 	info->alg[idx] = alg;
 	if (alg == NULL)
@@ -3175,8 +3267,14 @@ static bool charger_init_algo(struct mtk_charger *info)
 		}
 	}
 
-	chr_err("register chg1 notifier %d %d\n",
-		info->chg1_dev != NULL, info->algo.do_event != NULL);
+	chr_err("register chg1 notifier %d %d\n", info->chg1_dev != NULL, info->algo.do_event != NULL);
+
+	/*
+	注册充电器设备的事件回调函数
+	将主充电器设备的事件（如插入/拔出）绑定到 do_event 回调函数；
+	使用 register_charger_device_notifier() 完成注册；
+	charger_dev_set_drvdata() 设置设备私有数据为 info；
+	*/
 	if (info->chg1_dev != NULL && info->algo.do_event != NULL) {
 		chr_err("register chg1 notifier done\n");
 		info->chg1_nb.notifier_call = info->algo.do_event;
@@ -3185,8 +3283,7 @@ static bool charger_init_algo(struct mtk_charger *info)
 		charger_dev_set_drvdata(info->chg1_dev, info);
 	}
 
-	chr_err("register dvchg chg1 notifier %d %d\n",
-		info->dvchg1_dev != NULL, info->algo.do_dvchg1_event != NULL);
+	chr_err("register dvchg chg1 notifier %d %d\n", info->dvchg1_dev != NULL, info->algo.do_dvchg1_event != NULL);
 	if (info->dvchg1_dev != NULL && info->algo.do_dvchg1_event != NULL) {
 		chr_err("register dvchg chg1 notifier done\n");
 		info->dvchg1_nb.notifier_call = info->algo.do_dvchg1_event;
@@ -3195,8 +3292,7 @@ static bool charger_init_algo(struct mtk_charger *info)
 		charger_dev_set_drvdata(info->dvchg1_dev, info);
 	}
 
-	chr_err("register dvchg chg2 notifier %d %d\n",
-		info->dvchg2_dev != NULL, info->algo.do_dvchg2_event != NULL);
+	chr_err("register dvchg chg2 notifier %d %d\n", info->dvchg2_dev != NULL, info->algo.do_dvchg2_event != NULL);
 	if (info->dvchg2_dev != NULL && info->algo.do_dvchg2_event != NULL) {
 		chr_err("register dvchg chg2 notifier done\n");
 		info->dvchg2_nb.notifier_call = info->algo.do_dvchg2_event;
@@ -3208,10 +3304,22 @@ static bool charger_init_algo(struct mtk_charger *info)
 	return true;
 }
 
-static int mtk_charger_force_disable_power_path(struct mtk_charger *info,
-	int idx, bool disable);
+static int mtk_charger_force_disable_power_path(struct mtk_charger *info, int idx, bool disable);
+
+/*
+整体功能概述
+该函数的主要作用是：
+清除当前充电器类型（设为 POWER_SUPPLY_TYPE_UNKNOWN）；
+停止充电线程轮询；
+重置充电参数和计数器；
+向所有注册的充电算法发送“拔出”事件通知；
+设置主充电器设备（chg1_dev）为最小电流并禁用相关硬件路径；
+如果启用了电池电压监控，则关闭相关功能；
+这个函数通常在系统检测到充电器被拔出后被调用，确保系统正确地进入无充电状态。
+*/
 static int mtk_charger_plug_out(struct mtk_charger *info)
 {
+	//获取两个充电器设置的数据结构，用于后续清除或更新状态；
 	struct charger_data *pdata1 = &info->chg_data[CHG1_SETTING];
 	struct charger_data *pdata2 = &info->chg_data[CHG2_SETTING];
 	struct chg_alg_device *alg;
@@ -3219,32 +3327,81 @@ static int mtk_charger_plug_out(struct mtk_charger *info)
 	int i;
 
 	chr_err("%s\n", __func__);
+	/*
+	更新充电器状态为 “未连接”
+
+	将当前充电器类型设为未知（即拔出）；
+	停止充电线程轮询；
+	清除 PD 快充协议重置标志；
+	*/
 	info->chr_type = POWER_SUPPLY_TYPE_UNKNOWN;
 	info->charger_thread_polling = false;
 	info->pd_reset = false;
 
+	/*
+	重置充电器数据结构中的计数器
+
+	清除主副充电器的禁用计数器；
+	清除 AICL（自动输入限流）限制；
+	*/
 	pdata1->disable_charging_count = 0;
 	pdata1->input_current_limit_by_aicl = -1;
 	pdata2->disable_charging_count = 0;
 
+	/*
+	向所有充电算法发送“拔出”事件通知
+
+	构造一个事件通知结构体；
+	遍历所有注册的充电算法（如 PE、PD 等），发送 EVT_PLUG_OUT 事件；
+	这些算法收到通知后会做出响应，例如停止快充协商等；
+	*/
 	notify.evt = EVT_PLUG_OUT;
 	notify.value = 0;
 	for (i = 0; i < MAX_ALG_NO; i++) {
 		alg = info->alg[i];
 		chg_alg_notifier_call(alg, &notify);
 	}
+
+	/*
+	清空智能充电器数据缓存
+	*/
 	memset(&info->sc.data, 0, sizeof(struct scd_cmd_param_t_1));
+
+	/*
+	设置主充电器最小输入电流并禁用充电路径
+
+	设置主充电器输入电流为最小值（100mA）；
+	设置 MIVR（Minimum Input Voltage Regulation）为最低允许电压；
+	调用 charger_dev_plug_out() 标记主充电器已拔出；
+	强制禁用主充电器的电源路径（防止漏电或异常供电）；
+	*/
 	charger_dev_set_input_current(info->chg1_dev, 100000);
 	charger_dev_set_mivr(info->chg1_dev, info->data.min_charger_voltage);
 	charger_dev_plug_out(info->chg1_dev);
 	mtk_charger_force_disable_power_path(info, CHG1_SETTING, true);
 
+	/*
+	如果启用电池电压监控，关闭相关功能
+	如果启用了电池电压监控功能（6pin battery charging），则关闭它；
+	*/
 	if (info->enable_vbat_mon)
 		charger_dev_enable_6pin_battery_charging(info->chg1_dev, false);
 
 	return 0;
 }
 
+/*
+该函数的主要作用是：
+	更新当前充电器类型和 USB 类型；
+	启动充电线程轮询；
+	初始化与充电相关的各种标志位和状态；
+	获取当前电池电压并通知各快充算法进行插拔响应；
+	清空智能充电缓存；
+	标记主充电器设备为“已插入”；
+	启用电源路径供电；
+	触发智能充电控制（如温控限流等）；
+	这个函数通常在检测到充电器插入后被调用，标志着一次新的充电流程的开始。
+*/
 static int mtk_charger_plug_in(struct mtk_charger *info,
 				int chr_type)
 {
@@ -3252,13 +3409,20 @@ static int mtk_charger_plug_in(struct mtk_charger *info,
 	struct chg_alg_notify notify;
 	int i, vbat;
 
-	chr_debug("%s\n",
-		__func__);
+	chr_debug("%s\n", __func__);
 
 	info->chr_type = chr_type;
 	info->usb_type = get_usb_type(info);
-	info->charger_thread_polling = true;
+	info->charger_thread_polling = true;	//启动充电线程轮询
 
+	/*
+	初始化或重置各种充电状态标志
+
+	表示可以开始充电；
+	清除安全超时、VBUS过压等异常状态；
+	清除旧的恒压值；
+	清除某些特殊充电阶段的标记；
+	*/
 	info->can_charging = true;
 	//info->enable_dynamic_cv = true;
 	info->safety_timeout = false;
@@ -3266,11 +3430,20 @@ static int mtk_charger_plug_in(struct mtk_charger *info,
 	info->old_cv = 0;
 	info->stop_6pin_re_en = false;
 	info->batpro_done = false;
-	smart_charging(info);
+
+	smart_charging(info);	//触发智能充电逻辑
 	chr_err("mtk_is_charger_on plug in, type:%d\n", chr_type);
 
 	vbat = get_battery_voltage(info);
 
+	/*
+	向所有快充算法发送“插入”事件通知
+
+	构造一个事件通知结构体；
+	遍历所有注册的快充算法（如 PE、PD、PPS 等），发送 EVT_PLUG_IN 事件；
+	同时设置算法的参考电压为当前电池电压；
+	这些算法收到通知后会开始协商快充协议（如 PD、PE）、设置电压档位、启动快充流程等。
+	*/
 	notify.evt = EVT_PLUG_IN;
 	notify.value = 0;
 	for (i = 0; i < MAX_ALG_NO; i++) {
@@ -3279,35 +3452,48 @@ static int mtk_charger_plug_in(struct mtk_charger *info,
 		chg_alg_set_prop(alg, ALG_REF_VBAT, vbat);
 	}
 
-	memset(&info->sc.data, 0, sizeof(struct scd_cmd_param_t_1));
+	memset(&info->sc.data, 0, sizeof(struct scd_cmd_param_t_1));//清空智能充电器的数据缓存，准备新一轮充电；
 	info->sc.disable_in_this_plug = false;
 
-	charger_dev_plug_in(info->chg1_dev);
-	mtk_charger_force_disable_power_path(info, CHG1_SETTING, false);
+	charger_dev_plug_in(info->chg1_dev);	//告知底层驱动主充电器已经插入，准备开始供电
+	mtk_charger_force_disable_power_path(info, CHG1_SETTING, false);	//启用主充电器电源路径
 
 	return 0;
 }
 
+/*
+该函数的作用是：
+	获取当前充电器类型（如 USB、DCP、CDP 等）；
+	如果检测到充电器插入或拔出，调用插拔事件处理函数；
+	更新内部状态（如 info->chr_type 和 info->usb_type）；
+	最终返回是否正在充电（即是否有充电器插入）；
+	这个函数通常在充电线程中被周期性调用，用来监控充电器插拔状态的变化
+*/
 static bool mtk_is_charger_on(struct mtk_charger *info)
 {
 	int chr_type;
 
 	chr_type = get_charger_type(info);
-	if (chr_type == POWER_SUPPLY_TYPE_UNKNOWN) {
-		if (info->chr_type != POWER_SUPPLY_TYPE_UNKNOWN) {
-			mtk_charger_plug_out(info);
+	if (chr_type == POWER_SUPPLY_TYPE_UNKNOWN) {	//现在没有充电器插入
+		if (info->chr_type != POWER_SUPPLY_TYPE_UNKNOWN) { //之前有充电器插入
+			mtk_charger_plug_out(info);	//认为是拔出了，处理拔出逻辑
 			mutex_lock(&info->cable_out_lock);
 			info->cable_out_cnt = 0;
 			mutex_unlock(&info->cable_out_lock);
 		}
-	} else {
-		if (info->chr_type == POWER_SUPPLY_TYPE_UNKNOWN)
-			mtk_charger_plug_in(info, chr_type);
-		else {
+	} else {		//现在有充电器插入了
+		if (info->chr_type == POWER_SUPPLY_TYPE_UNKNOWN)	//之前是没有充电器插入的
+			mtk_charger_plug_in(info, chr_type);	//处理插入的逻辑
+		else {	//之前也有充电器插入，则更新充电器类型
 			info->chr_type = chr_type;
 			info->usb_type = get_usb_type(info);
 		}
 
+		/*
+		如果 cable_out_cnt > 0，表示可能发生了某种异常断开；
+		主动再次调用插拔事件来刷新状态；
+		清除计数器；
+		*/
 		if (info->cable_out_cnt > 0) {
 			mtk_charger_plug_out(info);
 			mtk_charger_plug_in(info, chr_type);
@@ -3317,6 +3503,10 @@ static bool mtk_is_charger_on(struct mtk_charger *info)
 		}
 	}
 
+	/*
+	如果当前没有充电器插入，返回 false；
+	否则返回 true，表示正在充电；
+	*/
 	if (chr_type == POWER_SUPPLY_TYPE_UNKNOWN)
 		return false;
 
@@ -3422,7 +3612,12 @@ static void charger_status_check(struct mtk_charger *info)
 	info->is_charging = charging;
 }
 
-
+/*
+用于将电池供电类型（chg_type）和 USB 类型（usb_type）转换为可读性更好的字符串表示，方便日志打印或调试使用。
+参数			类型				含义
+chg_type	int			电源类型，如 POWER_SUPPLY_TYPE_USB, POWER_SUPPLY_TYPE_USB_DCP 等
+usb_type	int			更细粒度的 USB 类型，如 POWER_SUPPLY_USB_TYPE_SDP
+*/
 static char *dump_charger_type(int chg_type, int usb_type)
 {
 	switch (chg_type) {
@@ -3444,25 +3639,46 @@ static char *dump_charger_type(int chg_type, int usb_type)
 	}
 }
 
+/*
+这是一个 内核线程函数，它在一个无限循环中持续运行，等待事件唤醒后执行以下核心任务：
+	初始化充电算法；
+	获取电池电压、温度、SOC 等信息；
+	检查并执行充电状态机；
+	调用快充协议算法（如 PE、PD、PPS）；
+	控制是否启用安全定时器；
+	实现“灭屏降电流”等智能充电策略；
+	保证系统在充电时保持唤醒（通过 wakelock）；
+*/
 static int charger_routine_thread(void *arg)
 {
 	struct mtk_charger *info = arg;
 	unsigned long flags;
 	unsigned int init_times = 3;
-	static bool is_module_init_done;
+	static bool is_module_init_done;	//是静态变量，表示充电模块是否初始化完成；
 	bool is_charger_on;
 	int ret;
 	int vbat_min, vbat_max;
 	u32 chg_cv = 0;
 
 	while (1) {
-		ret = wait_event_interruptible(info->wait_que,
-			(info->charger_thread_timeout == true));
+		/*
+		使用 wait_event_interruptible() 阻塞等待某个条件成立；
+		条件是 info->charger_thread_timeout == true；
+		如果被中断唤醒，则打印日志并继续循环；
+		*/
+		ret = wait_event_interruptible(info->wait_que, (info->charger_thread_timeout == true));
 		if (ret < 0) {
 			chr_err("%s: wait event been interrupted(%d)\n", __func__, ret);
 			continue;
 		}
 
+		/*
+		在首次运行时，尝试初始化充电算法模块；
+		成功则设置 is_module_init_done = true；
+		如果失败，最多重试 3 次，每次间隔 10 秒；
+		如果失败超过次数，进入每分钟一次的轮询尝试；
+		如果 info->charger_unlimited == true，禁用软件安全定时器；
+		*/
 		while (is_module_init_done == false) {
 			if (charger_init_algo(info) == true) {
 				is_module_init_done = true;
@@ -3483,6 +3699,13 @@ static int charger_routine_thread(void *arg)
 			}
 		}
 
+		/*
+		上锁+保持唤醒
+		获取互斥锁防止并发访问；
+		判断当前是否已经持有 wakelock（唤醒锁）；
+		如果没有，就调用 __pm_stay_awake() 保持系统不休眠；
+		清除超时标志位；
+		*/
 		mutex_lock(&info->charger_lock);
 		spin_lock_irqsave(&info->slock, flags);
 		if (!info->charger_wakelock->active)
@@ -3490,9 +3713,12 @@ static int charger_routine_thread(void *arg)
 		spin_unlock_irqrestore(&info->slock, flags);
 		info->charger_thread_timeout = false;
 
+		/*
+		获取电池温度、最小/最大电压、恒压值等；
+		这些信息用于后续判断充电状态和控制逻辑；
+		*/
 		info->battery_temp = get_battery_temperature(info);
-		ret = charger_dev_get_adc(info->chg1_dev,
-			ADC_CHANNEL_VBAT, &vbat_min, &vbat_max);
+		ret = charger_dev_get_adc(info->chg1_dev, ADC_CHANNEL_VBAT, &vbat_min, &vbat_max);
 		ret = charger_dev_get_constant_voltage(info->chg1_dev, &chg_cv);
 
 		if (vbat_min != 0)
@@ -3508,21 +3734,23 @@ static int charger_routine_thread(void *arg)
 			get_uisoc(info),
 			dump_charger_type(info->chr_type, info->usb_type),
 			dump_charger_type(get_charger_type(info), get_usb_type(info)),
-			info->pd_type, get_ibat(info), chg_cv);
+			info->pd_type, 
+			get_ibat(info), 
+			chg_cv);
 
+			//判断当前是否有充电器插入
 		is_charger_on = mtk_is_charger_on(info);
 
+		//如果开启了轮询模式，启动定时器以定期唤醒线程；
 		if (info->charger_thread_polling == true)
 			mtk_charger_start_timer(info);
 
-		check_battery_exist(info);
-		check_dynamic_mivr(info);
-		charger_check_status(info);
-		kpoc_power_off_check(info);
+		check_battery_exist(info);        // 检查电池是否存在
+		check_dynamic_mivr(info);         // 动态调整 MIVR（Minimum Input Voltage Regulation）
+		charger_check_status(info);       // 检查整体充电状态
+		kpoc_power_off_check(info);       // KPOC（Keep Power Off Charge）检查
 
-		if (is_disable_charger(info) == false &&
-			is_charger_on == true &&
-			info->can_charging == true) {
+		if (is_disable_charger(info) == false && is_charger_on == true && info->can_charging == true) {
 			if (info->algo.do_algorithm)
 				info->algo.do_algorithm(info);
 			charger_status_check(info);
@@ -3533,6 +3761,11 @@ static int charger_routine_thread(void *arg)
 		if (info->bootmode != 1 && info->bootmode != 2 && info->bootmode != 4
 			&& info->bootmode != 8 && info->bootmode != 9)
 			smart_charging(info);
+		
+		/*
+		释放 wakelock，允许系统进入休眠；
+		释放互斥锁，结束本次循环；
+		*/
 		spin_lock_irqsave(&info->slock, flags);
 		__pm_relax(info->charger_wakelock);
 		spin_unlock_irqrestore(&info->slock, flags);
@@ -3921,6 +4154,13 @@ end:
 	chr_err("%s: atm_enabled = %d\n", __func__, info->atm_enabled);
 }
 
+/*
+这个函数的作用是：
+	判断一个 power_supply 属性是否支持写入（即是否为“可配置”的属性）。
+	如果返回值为 1，表示该属性是可写的；
+	如果返回值为 0，表示该属性只读，不能被修改；
+	如果返回负数，表示出错（但一般不会这样用）
+*/
 static int psy_charger_property_is_writeable(struct power_supply *psy,
 					       enum power_supply_property psp)
 {
@@ -4092,6 +4332,7 @@ out:
 	return ret;
 }
 
+//根据传入的索引 idx 找到对应的充电器设备（如主充、副充），然后根据 disable 参数决定是否强制关闭或恢复其电源路径。
 static int mtk_charger_force_disable_power_path(struct mtk_charger *info,
 	int idx, bool disable)
 {
@@ -4103,7 +4344,7 @@ static int mtk_charger_force_disable_power_path(struct mtk_charger *info,
 
 	switch (idx) {
 	case CHG1_SETTING:
-		chg_dev = get_charger_by_name("primary_chg");
+		chg_dev = get_charger_by_name("primary_chg");//get_charger_by_name() 是一个内核接口，用于通过名字查找已注册的充电器设备对象。
 		break;
 	case CHG2_SETTING:
 		chg_dev = get_charger_by_name("secondary_chg");
@@ -4123,6 +4364,12 @@ static int mtk_charger_force_disable_power_path(struct mtk_charger *info,
 		goto out;
 
 	info->force_disable_pp[idx] = disable;
+	/*
+	调用 charger_dev_enable_powerpath() 接口来真正控制电源路径；
+	如果是强制关闭，则传递 false；
+	否则使用原本的使能标志 info->enable_pp[idx]；
+	返回值保存在 ret 中，用于返回给调用者；
+	*/
 	ret = charger_dev_enable_powerpath(chg_dev,
 		info->force_disable_pp[idx] ? false : info->enable_pp[idx]);
 out:
@@ -4206,6 +4453,20 @@ int psy_charger_set_property(struct power_supply *psy,
 	return 0;
 }
 
+/*
+当其他电源设备（比如充电器、电池）的状态发生变化时，这个函数会被调用，用于更新当前充电器的状态并触发充电流程。
+参数说明：
+	psy: 当前电源设备对象（例如 "mtk-master-charger"）；
+	这个函数会在系统中任意一个与它关联的电源设备发生状态变化时被调用（比如插拔 USB）；
+
+整体流程概览
+	获取驱动上下文 info；
+	获取或更新 chg_psy（充电器设备）；
+	读取充电器的在线状态、USB 类型、电池电量状态等属性；
+	根据这些信息更新内部状态（如是否启用某些功能）；
+	打印调试日志；
+	调用 _wake_up_charger(info) 唤醒充电线程进行处理；
+*/
 static void mtk_charger_external_power_changed(struct power_supply *psy)
 {
 	struct mtk_charger *info;
@@ -4215,14 +4476,25 @@ static void mtk_charger_external_power_changed(struct power_supply *psy)
 	struct power_supply *chg_psy = NULL;
 	int ret;
 
+	//获取私有数据 info
 	info = (struct mtk_charger *)power_supply_get_drvdata(psy);
-
 	if (info == NULL) {
 		pr_notice("%s: failed to get info\n", __func__);
 		return;
 	}
-	chg_psy = info->chg_psy;
 
+	/*
+	//获取或重新获取 chg_psy（充电器设备）
+	尝试从 info->chg_psy 中获取充电器设备；
+	如果失败，则通过设备树节点重新获取（根据编译选项选择 "charger" 或 "charger_second"）；
+	确保后续能访问到正确的充电器设备。
+
+	获取充电器的三个关键属性：
+		POWER_SUPPLY_PROP_ONLINE：是否连接了充电器；
+		POWER_SUPPLY_PROP_USB_TYPE：USB 插入类型（如 STANDARD、SDP、DCP 等）；
+		POWER_SUPPLY_PROP_ENERGY_EMPTY：电池是否为空（即是否刚插入没电的电池）；
+	*/
+	chg_psy = info->chg_psy;
 	if (IS_ERR_OR_NULL(chg_psy)) {
 		pr_notice("%s Couldn't get chg_psy\n", __func__);
 		chg_psy = devm_power_supply_get_by_phandle(&info->pdev->dev,
@@ -4233,14 +4505,19 @@ static void mtk_charger_external_power_changed(struct power_supply *psy)
 #endif
 		info->chg_psy = chg_psy;
 	} else {
-		ret = power_supply_get_property(chg_psy,
-			POWER_SUPPLY_PROP_ONLINE, &prop);
-		ret = power_supply_get_property(chg_psy,
-			POWER_SUPPLY_PROP_USB_TYPE, &prop2);
-		ret = power_supply_get_property(chg_psy,
-			POWER_SUPPLY_PROP_ENERGY_EMPTY, &vbat0);
+		ret = power_supply_get_property(chg_psy, POWER_SUPPLY_PROP_ONLINE, &prop);
+		ret = power_supply_get_property(chg_psy, POWER_SUPPLY_PROP_USB_TYPE, &prop2);
+		ret = power_supply_get_property(chg_psy, POWER_SUPPLY_PROP_ENERGY_EMPTY, &vbat0);
 	}
 
+	/*
+	判断电池是否为“空电池”
+	如果检测到电池是刚插入的空电池（vbat0.intval == true）：
+		关闭电压监控（enable_vbat_mon = false）；
+		禁用 6Pin 电池充电功能；
+	否则恢复之前的配置；
+		更新标志位 vbat0_flag，防止重复处理。
+	*/
 	if (info->vbat0_flag != vbat0.intval) {
 		if (vbat0.intval) {
 			info->enable_vbat_mon = false;
@@ -4255,9 +4532,25 @@ static void mtk_charger_external_power_changed(struct power_supply *psy)
 		psy->desc->name, prop.intval, prop2.intval,
 		get_vbus(info));
 
+	/*
+	唤醒充电管理线程
+	充电状态发生变化后，需要唤醒充电线程重新计算和执行；
+	_wake_up_charger() 会触发充电策略重新运行（比如开始充电、调整电流、切换路径等）
+	*/
 	_wake_up_charger(info);
 }
 
+/*
+这个函数的作用是：
+当系统收到 USB PD 或 Type-C 状态发生变化时（比如插入、拔出、PD 协议就绪、检测到水等），
+该回调函数会被调用，并更新当前充电器的状态信息，同时触发充电流程或上报事件。
+
+参数说明：
+	参数				类型				说明
+	notifier	struct notifier_block *	指向注册的通知块结构体
+	evt			unsigned long			触发的事件类型（如插拔、重置等）
+	val			void *					附加数据指针，根据事件类型可能指向不同类型的值
+*/
 int notify_adapter_event(struct notifier_block *notifier,
 			unsigned long evt, void *val)
 {
@@ -4265,10 +4558,15 @@ int notify_adapter_event(struct notifier_block *notifier,
 
 	chr_err("%s %lu\n", __func__, evt);
 
-	pinfo = container_of(notifier,
-		struct mtk_charger, pd_nb);
+	pinfo = container_of(notifier, struct mtk_charger, pd_nb);
 
 	switch (evt) {
+		/*
+		表示 PD 设备已断开连接；
+		更新内部状态为未连接；
+		调用算法层通知断开事件；
+		不唤醒充电线程。
+		*/
 	case  MTK_PD_CONNECT_NONE:
 		mutex_lock(&pinfo->pd_lock);
 		chr_err("PD Notify Detach\n");
@@ -4279,6 +4577,13 @@ int notify_adapter_event(struct notifier_block *notifier,
 		/* reset PE40 */
 		break;
 
+		/*
+		表示 PD 发生了硬重置；
+		清除连接类型；
+		设置重置标志；
+		上报硬重置事件；
+		唤醒充电线程重新判断状态。
+		*/
 	case MTK_PD_CONNECT_HARD_RESET:
 		mutex_lock(&pinfo->pd_lock);
 		chr_err("PD Notify HardReset\n");
@@ -4290,6 +4595,11 @@ int notify_adapter_event(struct notifier_block *notifier,
 		/* reset PE40 */
 		break;
 
+		/*
+		表示 PD 协议握手完成，固定电压供电已就绪；
+		更新内部连接状态；
+		不唤醒充电线程。
+		*/
 	case MTK_PD_CONNECT_PE_READY_SNK:
 		mutex_lock(&pinfo->pd_lock);
 		chr_err("PD Notify fixe voltage ready\n");
@@ -4299,6 +4609,11 @@ int notify_adapter_event(struct notifier_block *notifier,
 		/* PD is ready */
 		break;
 
+		/*
+		表示支持 USB PD3.0 的设备已连接；
+		更新协议版本信息；
+		不唤醒充电线程。
+		*/
 	case MTK_PD_CONNECT_PE_READY_SNK_PD30:
 		mutex_lock(&pinfo->pd_lock);
 		chr_err("PD Notify PD30 ready\r\n");
@@ -4308,6 +4623,11 @@ int notify_adapter_event(struct notifier_block *notifier,
 		/* PD30 is ready */
 		break;
 
+		/*
+		表示支持 Programmable Power Supply (PPS) 的设备已连接（即支持可编程电压调节）；
+		更新协议状态；
+		唤醒充电线程，准备进行 PPS 快充协商。
+		*/
 	case MTK_PD_CONNECT_PE_READY_SNK_APDO:
 		mutex_lock(&pinfo->pd_lock);
 		chr_err("PD Notify APDO Ready\n");
@@ -4318,6 +4638,11 @@ int notify_adapter_event(struct notifier_block *notifier,
 		_wake_up_charger(pinfo);
 		break;
 
+		/*
+		表示只使用 Type-C 连接，没有使用 PD 协议；
+		更新连接状态；
+		唤醒充电线程开始普通充电流程。
+		*/
 	case MTK_PD_CONNECT_TYPEC_ONLY_SNK:
 		mutex_lock(&pinfo->pd_lock);
 		chr_err("PD Notify Type-C Ready\n");
@@ -4327,6 +4652,14 @@ int notify_adapter_event(struct notifier_block *notifier,
 		/* type C is ready */
 		_wake_up_charger(pinfo);
 		break;
+
+		/*
+		表示 Type-C 接口检测到水（Water Detection）；
+		更新状态标志；
+		如果有水，则设置 notify_code 中的位标志；
+		最后调用 mtk_chgstat_notify() 向用户空间发送 uevent 通知；
+		用于触发上层（如 Android Framework）做出反应（如弹窗提示“检测到液体”）
+		*/
 	case MTK_TYPEC_WD_STATUS:
 		chr_err("wd status = %d\n", *(bool *)val);
 		pinfo->water_detected = *(bool *)val;
@@ -4353,14 +4686,33 @@ static char *mtk_charger_supplied_to[] = {
 	"battery"
 };
 
+/*
+这个函数的作用是：
+在系统中监听 显示屏幕（LCM）的状态变化事件（如亮屏、灭屏），当屏幕熄灭时设置标志位 is_basic_charger_lcmoff = 1，当屏幕点亮时设为 0。
+这个标志可以用于控制充电行为，例如在灭屏时降低充电电流以节省功耗或减少发热。
+*/
 static int basic_charger_lcmoff_fb_notifier_callback(struct notifier_block *nb,
                unsigned long value, void *v)
 {
+	/*
+	将 void *v 强制转换为 int *，获取传入的附加数据；
+	这个数据通常用于表示具体的显示状态，例如 MTK_DISP_BLANK_POWERDOWN 或 MTK_DISP_BLANK_UNBLANK；
+	*/
 	int *data = (int *)v;
 
 	if (!v)
 		return 0;
 
+	/*
+	if
+	表示屏幕从黑屏变为亮屏；
+	设置标志 is_basic_charger_lcmoff = 0 表示屏幕开启；
+	打印日志记录当前状态；
+	else if
+	表示屏幕即将进入熄灭状态；
+	设置标志 is_basic_charger_lcmoff = 1 表示屏幕关闭；
+	同样打印日志记录当前状态；
+	*/
 	if (value == MTK_DISP_EVENT_BLANK) { /* LCM ON */
 		if (*data == MTK_DISP_BLANK_UNBLANK) {
 			is_basic_charger_lcmoff = 0;
@@ -4549,28 +4901,23 @@ static int mtk_charger_probe(struct platform_device *pdev)
 		用户空间可以通过 cat 或 echo 访问这些属性；
 		返回值 psy1 是注册成功的 struct power_supply * 指针。
 	*/
-	info->psy1 = power_supply_register(&pdev->dev, &info->psy_desc1,
-			&info->psy_cfg1);
+	info->psy1 = power_supply_register(&pdev->dev, &info->psy_desc1, &info->psy_cfg1);
 
 	/*
 	从设备树中获取其他电源设备：
 	info->chg_psy	"charger" 节点	主要的充电 IC 设备
 	info->bat_psy	"gauge" 节点	电池电量计设备（记录电量、温度等）
 	*/
-	info->chg_psy = devm_power_supply_get_by_phandle(&pdev->dev,
-		"charger");
+	info->chg_psy = devm_power_supply_get_by_phandle(&pdev->dev, "charger");
 	if (IS_ERR_OR_NULL(info->chg_psy))
 		chr_err("%s: devm power fail to get chg_psy\n", __func__);
 
-	info->bat_psy = devm_power_supply_get_by_phandle(&pdev->dev,
-		"gauge");
+	info->bat_psy = devm_power_supply_get_by_phandle(&pdev->dev, "gauge");
 	if (IS_ERR_OR_NULL(info->bat_psy))
 		chr_err("%s: devm power fail to get bat_psy\n", __func__);
 
 	if (IS_ERR(info->psy1))
-		chr_err("register psy1 fail:%ld\n",
-			PTR_ERR(info->psy1));
-
+		chr_err("register psy1 fail:%ld\n", PTR_ERR(info->psy1));
 
 
 	info->psy_desc2.name = "mtk-slave-charger";
@@ -4582,12 +4929,11 @@ static int mtk_charger_probe(struct platform_device *pdev)
 	info->psy_desc2.property_is_writeable =
 			psy_charger_property_is_writeable;
 	info->psy_cfg2.drv_data = info;
-	info->psy2 = power_supply_register(&pdev->dev, &info->psy_desc2,
-			&info->psy_cfg2);
+	info->psy2 = power_supply_register(&pdev->dev, &info->psy_desc2, &info->psy_cfg2);
 
 	if (IS_ERR(info->psy2))
-		chr_err("register psy2 fail:%ld\n",
-			PTR_ERR(info->psy2));
+		chr_err("register psy2 fail:%ld\n", PTR_ERR(info->psy2));
+
 
 	info->psy_dvchg_desc1.name = "mtk-mst-div-chg";
 	info->psy_dvchg_desc1.type = POWER_SUPPLY_TYPE_UNKNOWN;
@@ -4605,6 +4951,7 @@ static int mtk_charger_probe(struct platform_device *pdev)
 	if (IS_ERR(info->psy_dvchg1))
 		chr_err("register psy dvchg1 fail:%ld\n",
 			PTR_ERR(info->psy_dvchg1));
+
 
 	info->psy_dvchg_desc2.name = "mtk-slv-div-chg";
 	info->psy_dvchg_desc2.type = POWER_SUPPLY_TYPE_UNKNOWN;
@@ -4625,17 +4972,18 @@ static int mtk_charger_probe(struct platform_device *pdev)
 
 	info->log_level = CHRLOG_ERROR_LEVEL;	//设置默认日志级别为错误级别。
 
-	info->pd_adapter = get_adapter_by_name("pd_adapter");	//获取 USB PD 适配器对象，用于支持 PD 快充协议。
+	info->pd_adapter = get_adapter_by_name("pd_adapter");	//根据名称查找适配器设备（adapter_device）,获取 USB PD 适配器对象，用于支持 PD 快充协议。
 	if (!info->pd_adapter)
 		chr_err("%s: No pd adapter found\n", __func__);
 	else {
+		//将 notify_adapter_event 函数注册为 info->pd_adapter 适配器设备的事件回调函数，这样当适配器发生连接、断开、协议就绪等事件时，就能自动触发这个函数进行处理。
+		info->pd_nb.notifier_call = notify_adapter_event;	//把 notify_adapter_event 函数设置为这个通知块的回调函数,当 PD 适配器发生事件（如插入、拔出、协商完成）时会被调用。
 		/*
-		注册适配器通知回调
-		注册一个通知器，当 PD 适配器发生事件（如插入、拔出、协商完成）时会被调用。
+		调用 register_adapter_device_notifier() 函数；
+		将前面设置好的 notifier_block（即 &info->pd_nb）注册到适配器设备 info->pd_adapter 上；
+		这样一来，当这个适配器设备发生特定事件时，内核就会调用你指定的回调函数 notify_adapter_event 来处理这些事件。
 		*/
-		info->pd_nb.notifier_call = notify_adapter_event;
-		register_adapter_device_notifier(info->pd_adapter,
-						 &info->pd_nb);	
+		register_adapter_device_notifier(info->pd_adapter, &info->pd_nb);	
 	}
 
 	/*
@@ -4663,6 +5011,11 @@ static int mtk_charger_probe(struct platform_device *pdev)
 	}
 	
 	//启动一个内核线程 charger_routine_thread，用于周期性地处理充电逻辑
+	/*
+	线程入口：charger_routine_thread
+	传入的参数：info
+	线程名字：charger_thread
+	*/
 	kthread_run(charger_routine_thread, info, "charger_thread");
 	#ifdef CONFIG_SUPPORT_MMI_TEST
 	mmi_pinfo = info;
