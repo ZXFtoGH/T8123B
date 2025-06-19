@@ -429,6 +429,11 @@ end:
 	*/
 }
 
+/*
+获取 MTK 充电驱动的调试日志级别
+首次调用时动态查找并缓存驱动数据
+后续调用直接使用缓存数据，提高效率
+*/
 int chr_get_debug_level(void)
 {
 	struct power_supply *psy;
@@ -496,6 +501,13 @@ void _wake_up_charger(struct mtk_charger *info)
 	wake_up_interruptible(&info->wait_que);	//唤醒之前因为等待充电事件而阻塞的进程（通常是充电管理线程）。
 }
 
+/*
+该函数的作用是：
+
+判断当前系统是否禁用了充电功能；
+如果禁用，则返回 true，表示不要进行任何充电操作；
+否则返回 false，表示可以正常充电；
+*/
 bool is_disable_charger(struct mtk_charger *info)
 {
 	if (info == NULL)
@@ -507,13 +519,12 @@ bool is_disable_charger(struct mtk_charger *info)
 		return false;
 }
 
-int _mtk_enable_charging(struct mtk_charger *info,
-	bool en)
+int _mtk_enable_charging(struct mtk_charger *info, bool en)
 {
 	chr_debug("%s en:%d\n", __func__, en);
 	if (info->algo.enable_charging != NULL)
 		return info->algo.enable_charging(info, en);
-	return false;
+	return false;	//如果 enable_charging 函数指针为空（即底层未实现），则返回 false；
 }
 
 int mtk_charger_notifier(struct mtk_charger *info, int event)
@@ -1050,34 +1061,56 @@ static void mtk_charger_start_timer(struct mtk_charger *info)
 	alarm_start(&info->charger_timer, ktime);	//alarm_start() 是 Linux 内核 API，用于真正启动定时器。
 }
 
+/*
+该函数的主要作用是：
+
+检测当前设备是否连接了电池；
+如果多次检测都未检测到电池，则根据当前启动模式决定是否关机；
+主要用于防止因误判导致的异常关机；
+常用于系统启动阶段或充电线程中进行电池状态监控；
+*/
 static void check_battery_exist(struct mtk_charger *info)
 {
 	unsigned int i = 0;
-	int count = 0;
+	int count = 0;	//统计“电池不存在”的次数；
 	//int boot_mode = get_boot_mode();
 
+	//如果当前充电器被禁用了（比如用户设置了关闭充电功能），则跳过检查
 	if (is_disable_charger(info))
 		return;
 
+	/*
+	调用 is_battery_exist() 函数连续检测三次；
+	如果某次检测失败（即返回 false），就将 count 加一；
+	这样做是为了避免一次偶然错误判断导致误操作；
+	*/
 	for (i = 0; i < 3; i++) {
 		if (is_battery_exist(info) == false)
 			count++;
 	}
 
 #ifdef FIXME
-	if (count >= 3) {
+	if (count >= 3) {	//如果三次检测都失败（即 count >= 3），说明电池很可能真的不存在
 		if (boot_mode == META_BOOT || boot_mode == ADVMETA_BOOT ||
 		    boot_mode == ATE_FACTORY_BOOT)
 			chr_info("boot_mode = %d, bypass battery check\n",
 				boot_mode);
 		else {
 			chr_err("battery doesn't exist, shutdown\n");
-			orderly_poweroff(true);
+			orderly_poweroff(true);	//调用 orderly_poweroff(true) 执行有序关机
 		}
 	}
 #endif
 }
 
+/*
+该函数的主要作用是：
+
+判断是否启用了 动态 MIVR 调整功能（enable_dynamic_mivr）；
+如果当前没有快充算法在运行，则根据当前电池电压动态设置主充电器的 MIVR 阈值；
+目的是在电池电压较低时降低 MIVR，避免输入电源崩溃；
+在电池电压升高后恢复 MIVR 到默认值
+*/
 static void check_dynamic_mivr(struct mtk_charger *info)
 {
 	int i = 0, ret = 0;
@@ -1085,9 +1118,14 @@ static void check_dynamic_mivr(struct mtk_charger *info)
 	bool is_fast_charge = false;
 	struct chg_alg_device *alg = NULL;
 
-	if (!info->enable_dynamic_mivr)
+	if (!info->enable_dynamic_mivr)	//如果未启用动态 MIVR 调整，直接返回，不执行后续逻辑；
 		return;
 
+	/*
+	遍历所有注册的充电算法（如 PD、PE 等）；
+	如果有任意一个算法处于运行状态（ALG_RUNNING），则标记为“正在快充”；
+	快充过程中一般不会调整 MIVR，因此在这种情况下跳过动态调整；
+	*/
 	for (i = 0; i < MAX_ALG_NO; i++) {
 		alg = info->alg[i];
 		if (alg == NULL)
@@ -1100,41 +1138,57 @@ static void check_dynamic_mivr(struct mtk_charger *info)
 		}
 	}
 
+	/*
+	min_charger_voltage_2、min_charger_voltage_1、min_charger_voltage 是预设的三档 MIVR 阈值；
+	单位转换注意：vbat 是以 mV 表示的，而 min_charger_voltage_x 可能是以 V 存储的，所以除以 1000；
+	-200 是预留的安全裕量（单位是 mV），防止误判；
+	根据当前电池电压选择合适的 MIVR 设置：
+	*/
 	if (!is_fast_charge) {
 		vbat = get_battery_voltage(info);
 		if (vbat < info->data.min_charger_voltage_2 / 1000 - 200)
-			charger_dev_set_mivr(info->chg1_dev,
-				info->data.min_charger_voltage_2);
+			charger_dev_set_mivr(info->chg1_dev, info->data.min_charger_voltage_2);
 		else if (vbat < info->data.min_charger_voltage_1 / 1000 - 200)
-			charger_dev_set_mivr(info->chg1_dev,
-				info->data.min_charger_voltage_1);
+			charger_dev_set_mivr(info->chg1_dev, info->data.min_charger_voltage_1);
 		else
-			charger_dev_set_mivr(info->chg1_dev,
-				info->data.min_charger_voltage);
+			charger_dev_set_mivr(info->chg1_dev, info->data.min_charger_voltage);
 	}
 }
 
-/* sw jeita */
+/* sw jeita
+这个函数的作用是：
+
+根据当前电池温度判断处于哪个 JEITA 温度区间；
+设置是否允许充电；
+动态调整充电电压（CV）和/或电流（CC）；
+实现电池在不同温度下的安全充电策略；
+JEITA 是日本电子信息技术产业协会制定的一套 锂电池温度保护标准，通常分为以下几个温度区间：
+
+状态			温度范围		是否允许充电		特点
+TEMP_BELOW_T0	< T0		❌ 不允许充电		低温保护
+TEMP_T0_TO_T1	T0 ~ T1		✅ 允许小电流充电	预热阶段
+TEMP_T1_TO_T2	T1 ~ T2		✅ 正常充电			常温区
+TEMP_T2_TO_T3	T2 ~ T3		✅ 正常充电			常温区
+TEMP_T3_TO_T4	T3 ~ T4		✅ 小电流充电		高温降流
+TEMP_ABOVE_T4	> T4		❌ 不允许充电		高温保护
+*/
 void do_sw_jeita_state_machine(struct mtk_charger *info)
 {
 	struct sw_jeita_data *sw_jeita;
 
 	sw_jeita = &info->sw_jeita;
-	sw_jeita->pre_sm = sw_jeita->sm;
-	sw_jeita->charging = true;
+	sw_jeita->pre_sm = sw_jeita->sm;	// 保存上一次状态
+	sw_jeita->charging = true;	// 默认允许充电
 
 	/* JEITA battery temp Standard */
-	if (info->battery_temp >= info->data.temp_t4_thres) {
-		chr_err("[SW_JEITA] Battery Over high Temperature(%d) !!\n",
-			info->data.temp_t4_thres);
+	if (info->battery_temp >= info->data.temp_t4_thres) {	//高于最高温度（T4）,禁止充电
+		chr_err("[SW_JEITA] Battery Over high Temperature(%d) !!\n", info->data.temp_t4_thres);
 
 		sw_jeita->sm = TEMP_ABOVE_T4;
 		sw_jeita->charging = false;
 	} else if (info->battery_temp > info->data.temp_t3_thres) {
 		/* control 45 degree to normal behavior */
-		if ((sw_jeita->sm == TEMP_ABOVE_T4)
-		    && (info->battery_temp
-			>= info->data.temp_t4_thres_minus_x_degree)) {
+		if ((sw_jeita->sm == TEMP_ABOVE_T4) && (info->battery_temp >= info->data.temp_t4_thres_minus_x_degree)) {
 			chr_err("[SW_JEITA] Battery Temperature between %d and %d,not allow charging yet!!\n",
 				info->data.temp_t4_thres_minus_x_degree,
 				info->data.temp_t4_thres);
@@ -1293,6 +1347,14 @@ static int mtk_chgstat_notify(struct mtk_charger *info)
 	return ret;
 }
 
+/*
+mtk_charger_set_algo_log_level() 是一个用于统一设置所有充电算法日志等级的函数，常用于调试或动态调整日志输出级别。
+这个函数的作用是：
+遍历当前所有激活的充电算法（chg_alg_device）；
+对每一个算法调用 chg_alg_set_prop(... ALG_LOG_LEVEL ...) 接口；
+设置其日志等级为传入的 level；
+用于调试或控制不同充电算法模块的日志输出详细程度；
+*/
 static void mtk_charger_set_algo_log_level(struct mtk_charger *info, int level)
 {
 	struct chg_alg_device *alg;
@@ -1342,7 +1404,7 @@ static DEVICE_ATTR_RW(sw_jeita);
 static ssize_t sw_ovp_threshold_show(struct device *dev, struct device_attribute *attr,
 					       char *buf)
 {
-	struct mtk_charger *pinfo = dev->driver_data;
+	struct mtk_charger *pinfo = dev->driver_data;	//pinfo = dev->driver_data: 从设备结构体获取驱动私有数据指针；
 
 	chr_err("%s: %d\n", __func__, pinfo->data.max_charger_voltage);
 	return sprintf(buf, "%d\n", pinfo->data.max_charger_voltage);
@@ -2095,27 +2157,64 @@ static const struct proc_ops mtk_chg_en_safety_timer_fops = {
 	.proc_write = mtk_chg_en_safety_timer_write,
 };
 
+/*
+它用于获取当前系统时间（以秒为单位），并将其转换为一天中从 00:00:00 开始计算的总秒数（即当天的“时间戳”）。
+这个函数通常用于 智能充电算法（Smart Charging） 中，用来判断当前是否在用户设定的充电时间段内。
+
+tm_android: 用于保存分解后的日期时间结构（年、月、日、时、分、秒等）；
+tv_android: 用于保存系统当前的时间戳（秒 + 纳秒）；
+timep: 最终返回值，表示当天经过的秒数；总秒数=小时×3600+分钟×60+秒
+*/
 int sc_get_sys_time(void)
 {
 	struct rtc_time tm_android = {0};
 	struct timespec64 tv_android = {0};
 	int timep = 0;
 
+	/*
+	使用 ktime_get_real_ts64() 获取系统当前真实时间（包括纳秒）；
+	这个时间是基于 UTC（协调世界时）的；
+	*/
 	ktime_get_real_ts64(&tv_android);
+
+	/*
+	将时间戳（tv_sec）转换成可读的 rtc_time 结构体；
+	此时 tm_android 表示的是 UTC 时间；
+	*/
 	rtc_time64_to_tm(tv_android.tv_sec, &tm_android);
+
+	/*
+	sys_tz 是 Linux 内核中的全局变量，保存了当前系统的时区设置；
+	tz_minuteswest 表示当前时区相对于 UTC 的分钟偏移（西为正，东为负）；
+	通过减去偏移量（换算成秒），将时间转为本地时间；
+	*/
 	tv_android.tv_sec -= (uint64_t)sys_tz.tz_minuteswest * 60;
+
+	/*
+	将调整过时区的时间戳再次转换为 rtc_time 格式；
+	现在 tm_android 表示的是本地时间；
+	*/
 	rtc_time64_to_tm(tv_android.tv_sec, &tm_android);
+
+	/*
+	tm_sec: 当前分钟内的秒数（0~59）；
+	tm_min: 当前小时内的分钟数（0~59）；
+	tm_hour: 当天的小时数（0~23）；
+	总秒数=小时×3600+分钟×60+秒
+	*/
 	timep = tm_android.tm_sec + tm_android.tm_min * 60 + tm_android.tm_hour * 3600;
 
 	return timep;
 }
 
+//计算当前时间 now 到目标结束时间 e 之间还剩多少秒，用于智能充电算法中判断是否处于用户设定的“充电时间段”。
+//考虑的真特么严谨
 int sc_get_left_time(int s, int e, int now)
 {
-	if (e >= s) {
+	if (e >= s) {	//时间段不跨天
 		if (now >= s && now < e)
 			return e-now;
-	} else {
+	} else {	//时间段跨天
 		if (now >= s)
 			return 86400 - now + e;
 		else if (now < e)
@@ -2124,6 +2223,7 @@ int sc_get_left_time(int s, int e, int now)
 	return 0;
 }
 
+//将一个整数类型的智能充电决策值转换为对应的可读字符串描述
 char *sc_solToStr(int s)
 {
 	switch (s) {
@@ -2272,6 +2372,13 @@ int smart_charging(struct mtk_charger *info)
 	return ret_value;
 }
 
+/*
+该函数的主要作用是：
+根据当前设备启动模式、温度限制、历史记录等因素，选择合适的充电电流值；
+控制电池电流不超过安全阈值，防止过热或损坏；
+是 Smart Charging（智能充电）机制的核心逻辑之一；
+最终结果会写入 pdata->charging_current_limit，供后续充电算法使用；
+*/
 void sc_select_charging_current(struct mtk_charger *info, struct charger_data *pdata)
 {
 	if (info->bootmode == 4 || info->bootmode == 1
@@ -2279,10 +2386,14 @@ void sc_select_charging_current(struct mtk_charger *info, struct charger_data *p
 		info->sc.sc_ibat = -1;	/* not normal boot */
 		return;
 	}
+	/*
+	将当前决策方案设为上次的处理结果；
+	这样可以保持充电行为的一致性；
+	*/
 	info->sc.solution = info->sc.last_solution;
 	chr_debug("debug: %d, %d, %d\n", info->bootmode,
 		info->sc.disable_in_this_plug, info->sc.solution);
-	if (info->sc.disable_in_this_plug == false) {
+	if (info->sc.disable_in_this_plug == false) {	//如果当前插拔周期未禁用智能控制，则进入处理流程；
 		chr_debug("sck: %d %d %d %d %d\n",
 			info->sc.pre_ibat,
 			info->sc.sc_ibat,
@@ -2291,7 +2402,7 @@ void sc_select_charging_current(struct mtk_charger *info, struct charger_data *p
 			info->sc.solution);
 		if (info->sc.pre_ibat == -1 || info->sc.solution == SC_IGNORE
 			|| info->sc.solution == SC_DISABLE) {
-			info->sc.sc_ibat = -1;
+			info->sc.sc_ibat = -1;	//当前 IBAT 设为 -1，表示不进行智能限流；
 		} else {
 			if (info->sc.pre_ibat == pdata->charging_current_limit
 				&& info->sc.solution == SC_REDUCE
@@ -2611,11 +2722,18 @@ static ssize_t sc_ibat_limit_show(
 	return sprintf(buf, "%d\n", info->sc.current_limit);
 }
 
+/*
+该函数的作用是：
+从用户空间接收一个字符串形式的数值（比如 "1000"）；
+将其转换为整数，并赋值给 info->sc.current_limit；
+这个变量用于控制 智能充电（Smart Charging）模式下的电池电流上限；
+常用于系统级温控、功耗管理或电池保护场景；
+*/
 static ssize_t sc_ibat_limit_store(
 	struct device *dev, struct device_attribute *attr,
 					 const char *buf, size_t size)
 {
-	long val = 0;
+	long val = 0;	//存储从用户输入解析出的数值
 	int ret;
 	struct power_supply *chg_psy = NULL;
 	struct mtk_charger *info = NULL;
@@ -2631,7 +2749,7 @@ static ssize_t sc_ibat_limit_store(
 
 	if (buf != NULL && size != 0) {
 		chr_err("[smartcharging ibat limit] buf is %s\n", buf);
-		ret = kstrtol(buf, 10, &val);
+		ret = kstrtol(buf, 10, &val);	//将buf的值转化为十进制的，然后赋值给val
 		if (ret == -ERANGE || ret == -EINVAL)
 			return -EINVAL;
 		if (val < 0) {
@@ -2681,6 +2799,7 @@ static ssize_t mmi_charge_enable_store(
 	mtk_battery_external_power_changed(mmi_pinfo->bat_psy);	
 	return size;
 }
+
 static ssize_t mmi_charge_enable_all_show(
 	struct device *dev, struct device_attribute *attr,
 					char *buf)
@@ -2689,6 +2808,13 @@ static ssize_t mmi_charge_enable_all_show(
 	"[mmi_charge_enable_all_show] : %d\n",
 	mmi_charge_enable_all_flag);
 
+	/*
+	将整型变量 mmi_charge_enable_all_flag 的值，以十进制数字的形式写入到缓冲区 buf 中，并在末尾加上换行符 \n。
+
+	注意事项
+	sprintf() 不会检查缓冲区大小，容易造成缓冲区溢出；
+	在内核空间中使用时要特别小心，建议优先使用更安全的替代函数如 snprintf()；
+	*/
 	return sprintf(buf, "%d\n", mmi_charge_enable_all_flag);
 }
 
@@ -2734,6 +2860,11 @@ static ssize_t ship_mode_store(
 	int ret;
 	int ship_mode_flag;
 
+	/*
+	buf: 用户写入到 sysfs 文件的内容（比如 "1\n" 或 "0"）；
+	0: 自动识别进制（支持十进制和十六进制）；
+	&ship_mode_flag: 把解析后的整数存到这个变量里；
+	*/
 	ret = kstrtouint(buf, 0, &ship_mode_flag);
 	if (ret != 0)
 			return -EINVAL;
@@ -2773,6 +2904,14 @@ static ssize_t chgtmp_enable_store(
 }
 static DEVICE_ATTR_RW(chgtmp_enable);
 
+/*
+该函数的作用是：
+控制是否启用 VBUS 的软件过压保护（Over Voltage Protection）机制；
+如果启用，则设置最大允许输入电压为预设值（如 6500000uV）；
+如果禁用，则将最大电压设为一个极高值（如 15000000uV），相当于关闭 OVP 检测；
+同时调用底层函数 disable_hw_ovp() 来控制硬件级别的 OVP；
+此函数被导出为符号，可供其他模块（如 USB PD、无线充驱动）调用；
+*/
 int mtk_chg_enable_vbus_ovp(bool enable)
 {
 	static struct mtk_charger *pinfo;
@@ -2780,6 +2919,12 @@ int mtk_chg_enable_vbus_ovp(bool enable)
 	u32 sw_ovp = 0;
 	struct power_supply *psy;
 
+	/*
+	第一次调用时 pinfo == NULL，需要动态获取主充电器设备；
+	使用 power_supply_get_by_name("mtk-master-charger") 获取电源设备；
+	再通过 power_supply_get_drvdata() 获取其私有数据结构 mtk_charger；
+	如果失败则返回错误码 -1；
+	*/
 	if (pinfo == NULL) {
 		psy = power_supply_get_by_name("mtk-master-charger");
 		if (psy == NULL) {
@@ -2824,6 +2969,13 @@ static bool mtk_chg_check_vbus(struct mtk_charger *info)
 	return true;
 }
 
+/*
+该函数的主要作用是：
+	获取当前输入电压（VBUS）；
+	判断它是否超过预设的最大允许充电电压；
+	如果超过，则设置一个通知标志，并调用通知接口告知用户空间；
+	用于在 Android Framework 中触发电池状态更新或警告提示（如“适配器异常”）；
+*/
 static void mtk_battery_notify_VCharger_check(struct mtk_charger *info)
 {
 #if defined(BATTERY_NOTIFY_CASE_0001_VCHARGER)
@@ -2877,6 +3029,23 @@ static void mtk_battery_notify_VBatTemp_check(struct mtk_charger *info)
 #endif
 }
 
+/*
+该函数的作用是：
+
+根据 info->notify_test_mode 的值（即“测试模式编号”），模拟一个特定的电池/充电异常状态；
+设置对应的 notify_code；
+然后调用 mtk_chgstat_notify(info) 向用户空间发送通知；
+主要用于 调试或工厂测试 UI 显示逻辑，比如在不接真实异常设备的情况下验证 Android Framework 是否能正确显示提示信息；
+
+case 值	对应宏				描述
+1	CHG_VBUS_OV_STATUS	输入电压过高（VBUS Over Voltage）
+2	CHG_BAT_OT_STATUS	电池温度过高（Battery Over Temperature）
+3	CHG_OC_STATUS	充电电流过大（Over Current）
+4	CHG_BAT_OV_STATUS	电池电压过高（Battery Over Voltage）
+5	CHG_ST_TMO_STATUS	总充电时间超时（Safety Timer Timeout）
+6	CHG_BAT_LT_STATUS	电池温度过低（Battery Low Temperature）
+7	CHG_TYPEC_WD_STATUS	Type-C 潮湿检测（Moisture Detection）
+*/
 static void mtk_battery_notify_UI_test(struct mtk_charger *info)
 {
 	switch (info->notify_test_mode) {
@@ -2915,15 +3084,31 @@ static void mtk_battery_notify_UI_test(struct mtk_charger *info)
 	mtk_chgstat_notify(info);
 }
 
+/*
+该函数的主要作用是：
+
+判断是否处于“测试模式”（由 notify_test_mode 控制）；
+如果不是测试模式，则执行正常的电池电压、温度等状态检查；
+如果是测试模式，则进入 UI 测试通知流程；
+这些检查和通知通常用于触发 Android Framework 层的状态更新或警告提示；
+*/
 static void mtk_battery_notify_check(struct mtk_charger *info)
 {
-	if (info->notify_test_mode == 0x0000) {
+	if (info->notify_test_mode == 0x0000) {	//如果其值为 0x0000，表示非测试模式，即正常运行状态
 		mtk_battery_notify_VCharger_check(info);
 		mtk_battery_notify_VBatTemp_check(info);
 	} else {
 		mtk_battery_notify_UI_test(info);
 	}
 }
+
+/*
+该函数的主要作用是：
+获取主充电器（CHG1）、从充电器（CHG2）以及双路充电器（DVCHG1/DVCHG2）的结温信息；
+如果读取成功，就更新到对应的 charger_data 数据结构中；
+如果失败，设为默认无效值 -127；
+这些温度数据后续可用于热保护、充电策略调整等
+*/
 
 static void mtk_chg_get_tchg(struct mtk_charger *info)
 {
@@ -2989,6 +3174,15 @@ static void mtk_chg_get_tchg(struct mtk_charger *info)
 	}
 }
 
+/*
+该函数的主要作用是：
+
+实时检查设备的充电状态；
+判断当前是否允许进行充电；
+如果不允许，则调用 _mtk_enable_charging() 关闭充电；
+否则维持充电状态；
+是一个周期性执行的函数，通常在充电线程中被调用；
+*/
 static void charger_check_status(struct mtk_charger *info)
 {
 	bool charging = true;
@@ -3004,11 +3198,17 @@ static void charger_check_status(struct mtk_charger *info)
 	thermal = &info->thermal;
 	uisoc = get_uisoc(info);
 
-	info->setting.vbat_mon_en = true;
-	if (info->enable_sw_jeita == true || info->enable_vbat_mon != true ||
-	    info->batpro_done == true)
+	info->setting.vbat_mon_en = true;	//默认启用电池电压监控；
+	if (info->enable_sw_jeita == true || info->enable_vbat_mon != true || info->batpro_done == true)	//如果启用了软件 JEITA、未启用电压监控、或电池保护流程已完成，则禁用监控；
 		info->setting.vbat_mon_en = false;
 
+	/*
+	软件 JEITA 温度保护逻辑（优先级最高）
+
+	如果启用了软件 JEITA（一种电池温度保护算法）；
+	执行 JEITA 状态机；
+	如果 JEITA 判定不能充电，则设置 charging = false，跳转到停止充电部分；
+	*/
 	if (info->enable_sw_jeita == true) {
 		do_sw_jeita_state_machine(info);
 		if (info->sw_jeita.charging == false) {
@@ -3016,8 +3216,14 @@ static void charger_check_status(struct mtk_charger *info)
 			goto stop_charging;
 		}
 	} else {
-
-		if (thermal->enable_min_charge_temp) {
+		/*
+		//常规热保护逻辑（非 JEITA 模式）
+		如果当前电池温度低于最低允许充电温度（低温保护）；
+		或高于最高允许充电温度（高温保护）；
+		则禁止充电；
+		并更新状态机（如从低温恢复）；
+		*/
+		if (thermal->enable_min_charge_temp) {	
 			if (temperature <= thermal->min_charge_temp) {
 				chr_err("Battery Under Temperature or NTC fail %d %d\n",
 					temperature, thermal->min_charge_temp);
@@ -3028,12 +3234,12 @@ static void charger_check_status(struct mtk_charger *info)
 				#endif
 				goto stop_charging;
 			} else if (thermal->sm == BAT_TEMP_LOW) {
-				if (temperature >=
-				    thermal->min_charge_temp_plus_x_degree) {
+				if (temperature >= thermal->min_charge_temp_plus_x_degree) {
 					chr_err("Battery Temperature raise from %d to %d(%d), allow charging!!\n",
 					thermal->min_charge_temp,
 					temperature,
 					thermal->min_charge_temp_plus_x_degree);
+					
 					thermal->sm = BAT_TEMP_NORMAL;
 					#ifdef CONFIG_SUPPORT_MMI_TEST
 					temp_charge_enable_flag = 1;
@@ -3049,8 +3255,7 @@ static void charger_check_status(struct mtk_charger *info)
 		}
 
 		if (temperature >= thermal->max_charge_temp) {
-			chr_err("Battery over Temperature or NTC fail %d %d\n",
-				temperature, thermal->max_charge_temp);
+			chr_err("Battery over Temperature or NTC fail %d %d\n", temperature, thermal->max_charge_temp);
 			thermal->sm = BAT_TEMP_HIGH;
 			charging = false;
 			#ifdef CONFIG_SUPPORT_MMI_TEST
@@ -3058,8 +3263,7 @@ static void charger_check_status(struct mtk_charger *info)
 			#endif
 			goto stop_charging;
 		} else if (thermal->sm == BAT_TEMP_HIGH) {
-			if (temperature
-			    <= thermal->max_charge_temp_minus_x_degree) {
+			if (temperature <= thermal->max_charge_temp_minus_x_degree) {
 				chr_err("Battery Temperature raise from %d to %d(%d), allow charging!!\n",
 				thermal->max_charge_temp,
 				temperature,
@@ -3078,6 +3282,15 @@ static void charger_check_status(struct mtk_charger *info)
 		}
 	}
 
+	/*
+	其他充电条件判断
+	检查 VBUS 是否异常；
+	是否强制放电（cmd_discharging）；
+	是否触发安全超时（safety_timeout）；
+	是否发生过压保护（vbusov_stat）；
+	是否智能充电策略要求禁用充电（sc.disable_charger）；
+	→ 任意一个条件满足，就禁止充电。
+	*/
 	mtk_chg_get_tchg(info);
 
 	if (!mtk_chg_check_vbus(info)) {
@@ -3513,11 +3726,37 @@ static bool mtk_is_charger_on(struct mtk_charger *info)
 	return true;
 }
 
+/*
+这个函数的作用是：
+	在 KPOC 模式下，每隔 60 秒 发送一次充电状态更新事件（uevent）；
+	防止长时间不插拔充电器导致上层系统无法感知设备状态；
+	通过限制频率来避免频繁触发，节省资源并防止日志刷屏；
+*/
 static void charger_send_kpoc_uevent(struct mtk_charger *info)
 {
-	static bool first_time = true;
+	static bool first_time = true;	//该变量是 static 类型，意味着它只在本函数内部可见，并且保持其值直到程序结束；
 	ktime_t ktime_now;
 
+	/*
+	如果是第一次调用：
+	使用 ktime_get() 获取当前时间戳（高精度时间）；
+	存储到 info->uevent_time_check 中；
+	将 first_time 设为 false，下次不再进入这个分支；
+
+	后续调用时判断是否已过 60 秒
+	获取当前时间
+		ktime_now = ktime_get();
+	🔹 计算时间差（单位：秒）
+		ktime_ms_delta(now, last) 返回两个时间之间的毫秒差；
+		/ 1000 转换为秒；
+		如果大于等于 60 秒，则执行通知；
+	🔹 发送充电状态通知
+		mtk_chgstat_notify(info);
+		向用户空间发送 uevent 事件；
+		Android Framework 可以监听这些事件并更新 UI（比如显示充电进度、电池状态等）；
+	🔹 更新最后发送时间
+		info->uevent_time_check = ktime_now;
+	*/
 	if (first_time) {
 		info->uevent_time_check = ktime_get();
 		first_time = false;
@@ -3531,6 +3770,17 @@ static void charger_send_kpoc_uevent(struct mtk_charger *info)
 }
 
 int first_plug = 0;
+
+/*
+该函数的主要作用是：
+在 KPOC（Kernel Power Off Charging，内核级关机充电）模式 下，如果用户拔掉了充电器或 USB 线：
+	检测到 VBUS 电压低于安全阈值（<2500mV）；
+	并且没有在充电；
+	并且不是 PD 快充重置过程中；
+则进入一个循环等待过程；
+如果等待太久还没插回充电器，则强制调用 kernel_power_off() 关机；
+主要目的是防止设备因断电而死机或损坏数据；
+*/
 static void kpoc_power_off_check(struct mtk_charger *info)
 {
 	unsigned int boot_mode = info->bootmode;
@@ -3540,9 +3790,24 @@ static void kpoc_power_off_check(struct mtk_charger *info)
 	/* 9 = LOW_POWER_OFF_CHARGING_BOOT */
 	if (boot_mode == 8 || boot_mode == 9) {
 		vbus = get_vbus(info);
+		/*
+		vbus < 2500：表示当前输入电压低于 2.5V，通常意味着充电器被拔掉；
+		!mtk_is_charger_on(info)：表示当前没有在充电；
+		!info->pd_reset：排除正在做 PD 快充协议重置的情况；
+		所有条件都满足，说明用户拔掉了充电器；
+		*/
 		if (vbus >= 0 && vbus < 2500 && !mtk_is_charger_on(info) && !info->pd_reset) {
 			chr_err("Unplug Charger/USB in KPOC mode, vbus=%d, shutdown\n", vbus);
-			while (1) {
+			while (1) {	//进入无限循环等待，尝试安全关机
+			/*
+			不启用双主充时（第一种情况）：
+				最多等待 20000 次，每次休眠 20ms，总共约 400 秒（6分多钟）；
+				如果系统不在挂起状态（is_suspend == false），直接关机；
+				否则继续等待；
+			🔸 启用双主充时（第二种情况）：
+				最多等待 20 次，每次休眠 50ms，共 1 秒；
+				如果检测到重新插入了充电器（VBUS > 2500mV 且正在充电），就跳出循环不再关机；
+			*/
 			#if !IS_ENABLED(CONFIG_CHARGER_SECOND_MAINCHG)
 				if (counter >= 20000) {
 					chr_err("%s, wait too long\n", __func__);
@@ -3556,7 +3821,7 @@ static void kpoc_power_off_check(struct mtk_charger *info)
 					chr_err("%s, suspend! cannot shutdown\n", __func__);
 					msleep(20);
 				}		
-				#else
+			#else
 				if (counter >= 20) {
 					chr_err("%s, wait too long\n", __func__);
 					kernel_power_off();
@@ -3567,46 +3832,57 @@ static void kpoc_power_off_check(struct mtk_charger *info)
 					break;
 				}
 				msleep(50);
-				#endif
+			#endif
 				counter++;
 				}
 			}
-		charger_send_kpoc_uevent(info);
+		charger_send_kpoc_uevent(info);	//发送 uevent 通知上层
 	}
 }
 
+/*
+该函数的主要作用是：
+	获取当前主充电器（或备用充电器）的状态；
+	判断设备是否正在充电；
+	如果状态发生变化，则调用 power_supply_changed() 通知 Android Framework 更新 UI；
+	这个函数通常被周期性调用（比如通过 workqueue），用于监控充电状态变化；
+*/
 static void charger_status_check(struct mtk_charger *info)
 {
-	union power_supply_propval online, status;
+	union power_supply_propval online, status;	//用来保存从电源子系统获取的属性值；
 	struct power_supply *chg_psy = NULL;
 	int ret;
 	bool charging = true;
 
-	chg_psy = devm_power_supply_get_by_phandle(&info->pdev->dev,
-						       "charger");
+	chg_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "charger");
 #if IS_ENABLED(CONFIG_CHARGER_SECOND_MAINCHG)
 	if (IS_ERR_OR_NULL(chg_psy)) {
 		chr_err("%s retry get chg_psy\n", __func__);
-		chg_psy = devm_power_supply_get_by_phandle(&info->pdev->dev,
-												"charger_second");
+		chg_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "charger_second");
 	}
 #endif
 	if (IS_ERR_OR_NULL(chg_psy)) {
 		chr_err("%s Couldn't get chg_psy\n", __func__);
 	} else {
-		ret = power_supply_get_property(chg_psy,
-			POWER_SUPPLY_PROP_ONLINE, &online);
+		ret = power_supply_get_property(chg_psy, POWER_SUPPLY_PROP_ONLINE, &online);
 
-		ret = power_supply_get_property(chg_psy,
-			POWER_SUPPLY_PROP_STATUS, &status);
+		ret = power_supply_get_property(chg_psy, POWER_SUPPLY_PROP_STATUS, &status);
 
 		if (!online.intval)
 			charging = false;
 		else {
-			if (status.intval == POWER_SUPPLY_STATUS_NOT_CHARGING)
+			if (status.intval == POWER_SUPPLY_STATUS_NOT_CHARGING)	//如果等于 POWER_SUPPLY_STATUS_NOT_CHARGING：表示虽然插着充电器，但不充电
 				charging = false;
 		}
 	}
+	/*
+	比较新旧状态：
+	如果不一样，调用 power_supply_changed()；
+	这会触发 Android Framework 中监听 battery 的服务进行更新；
+	比如显示“正在充电”、“已停止充电”等状态；
+
+	把最新的充电状态保存下来，供下一次比较使用；
+	*/
 	if (charging != info->is_charging)
 		power_supply_changed(info->psy1);
 	info->is_charging = charging;
@@ -5028,9 +5304,15 @@ static int mtk_charger_remove(struct platform_device *dev)
 	return 0;
 }
 
+/*
+该函数的主要作用是：
+在系统关机前，安全地停止所有正在运行的充电算法；
+防止充电器在关机状态下继续工作，造成不必要的功耗或安全隐患；
+是设备驱动生命周期中一个重要的“关机钩子函数（shutdown hook）”；
+*/
 static void mtk_charger_shutdown(struct platform_device *dev)
 {
-	struct mtk_charger *info = platform_get_drvdata(dev);
+	struct mtk_charger *info = platform_get_drvdata(dev);	//使用 platform_get_drvdata() 从平台设备中获取之前保存的驱动私有数据；
 	int i;
 
 	for (i = 0; i < MAX_ALG_NO; i++) {
