@@ -18,8 +18,19 @@ static struct class *charger_class;
 static ssize_t name_show(struct device *dev,
 				    struct device_attribute *attr, char *buf)
 {
+	/*
+	使用 to_charger_device() 宏从通用的 struct device 结构体获取具体的 charger_device 类型的指针。
+	这是 Linux 内核中常见的面向对象编程手法，将通用结构体转换为具体子类结构体。
+	*/
 	struct charger_device *chg_dev = to_charger_device(dev);
 
+	/*
+	向用户空间返回一个字符串：
+	如果 chg_dev->props.alias_name 不为 NULL，则打印它；
+	否则打印 "anonymous"。
+	snprintf() 是安全格式化输出函数，防止缓冲区溢出。
+	缓冲区大小限制为 20 字节，确保不会越界。
+	*/
 	return snprintf(buf, 20, "%s\n",
 		       chg_dev->props.alias_name ?
 		       chg_dev->props.alias_name : "anonymous");
@@ -813,11 +824,23 @@ static const struct attribute_group *charger_groups[] = {
 	NULL,
 };
 
+/*
+功能：将一个 notifier_block 注册到指定充电器设备的通知链中。
+参数说明：
+	struct charger_device *chg_dev：指向充电器设备的指针。
+	struct notifier_block *nb：用户提供的通知回调块，包含事件处理函数。
+*/
 int register_charger_device_notifier(struct charger_device *chg_dev,
 				struct notifier_block *nb)
 {
 	int ret;
 
+	/*
+	调用 srcu_notifier_chain_register() 函数，将 notifier_block 添加到 chg_dev->evt_nh 指向的通知链中。
+	evt_nh 是 struct srcu_notifier_head 类型，表示一个 SRCU（Sleepable RCU）通知链头。
+	SRCU 是一种适用于可以睡眠的上下文中的 RCU 实现，常用于设备模型中需要异步通知的场景。
+	返回值是注册操作的结果，成功返回 0，失败返回错误码。
+	*/
 	ret = srcu_notifier_chain_register(&chg_dev->evt_nh, nb);
 	return ret;
 }
@@ -842,6 +865,22 @@ EXPORT_SYMBOL(unregister_charger_device_notifier);
  * Creates and registers new charger device. Returns either an
  * ERR_PTR() or a pointer to the newly allocated device.
  */
+/*
+它的作用是动态分配并初始化一个 charger_device 结构体，并将其注册到内核的设备模型中，使得该设备可以在 /sys/class/switching_charger/... 下被访问和控制。
+
+参数		类型						描述
+name		const char *			设备名称，如 "primary_chg"
+parent		struct device *			父设备指针，通常是某个平台设备（platform device）
+devdata		void *					私有数据指针，可以通过 dev_get_drvdata() 获取
+ops			const struct charger_ops *	操作函数集合（如 enable、set_current 等）
+props		const struct charger_properties *	充电器的属性信息，如别名等
+
+该函数的作用是：
+	动态创建并初始化一个 charger_device；
+	注册该设备到内核的设备模型中；
+	设置其操作函数集和属性；
+	返回这个设备指针，供其他模块使用。
+*/
 struct charger_device *charger_device_register(const char *name,
 		struct device *parent, void *devdata,
 		const struct charger_ops *ops,
@@ -857,28 +896,33 @@ struct charger_device *charger_device_register(const char *name,
 	if (!chg_dev)
 		return ERR_PTR(-ENOMEM);
 
+	/*
+	初始化一个 SRCU（Sleepable RCU）通知链头 evt_nh，用于后续注册事件回调。
+	lockdep_init_map() 是为了防止 lockdep 报错，给这个锁命名以帮助调试。
+	*/
 	head = &chg_dev->evt_nh;
 	srcu_init_notifier_head(head);
+
 	/* Rename srcu's lock to avoid LockProve warning */
 	lockdep_init_map(&(&head->srcu)->dep_map, name, &key, 0);
 	mutex_init(&chg_dev->ops_lock);
 	chg_dev->dev.class = charger_class;
 	chg_dev->dev.parent = parent;
 	chg_dev->dev.release = charger_device_release;
-	dev_set_name(&chg_dev->dev, name);
-	dev_set_drvdata(&chg_dev->dev, devdata);
+	dev_set_name(&chg_dev->dev, name);	//设置设备名字，将出现在 /sys/class/switching_charger/<name>。
+	dev_set_drvdata(&chg_dev->dev, devdata);	//存储私有数据 devdata，供驱动内部使用。
 
-	/* Copy properties */
+	/* Copy properties 如果提供了 props，则拷贝到 chg_dev->props 中，保存设备的静态属性。*/
 	if (props) {
 		memcpy(&chg_dev->props, props,
 		       sizeof(struct charger_properties));
 	}
-	rc = device_register(&chg_dev->dev);
+	rc = device_register(&chg_dev->dev);	//调用 device_register() 将设备注册进内核设备模型
 	if (rc) {
 		kfree(chg_dev);
 		return ERR_PTR(rc);
 	}
-	chg_dev->ops = ops;
+	chg_dev->ops = ops;	//最后把用户传入的操作函数集赋值给 chg_dev->ops
 	return chg_dev;
 }
 EXPORT_SYMBOL(charger_device_register);
@@ -931,6 +975,24 @@ static void __exit charger_class_exit(void)
 	class_destroy(charger_class);
 }
 
+/*
+在系统启动或模块加载时，创建一个名为 "switching_charger" 的设备类，
+并为其设置 sysfs 属性组（charger_groups），以便后续注册的充电器设备可以属于这个类，并向用户空间暴露一些可访问的属性。
+
+具体解释见MD文档
+
+整体流程
+	尝试创建名为"switching_charger"的设备类
+	如果创建失败，打印错误信息并返回错误码
+	如果创建成功，设置类的属性组
+	返回成功状态(0)
+
+设备类的作用
+	在Linux内核中，设备类(class)是一种将功能相似的设备分组管理的机制。通过创建这个"switching_charger"类：
+		所有属于充电设备的驱动都可以归类到这里
+		用户空间可以通过/sys/class/switching_charger/访问这些设备
+		提供了统一的管理接口
+*/
 static int __init charger_class_init(void)
 {
 	charger_class = class_create(THIS_MODULE, "switching_charger");
@@ -943,6 +1005,20 @@ static int __init charger_class_init(void)
 	return 0;
 }
 
+/*
+主要区别总结
+特性	subsys_initcall	   module_init
+执行时机	内核启动阶段	模块加载时
+代码位置	编译进内核镜像	作为独立模块加载
+适用场景	子系统初始化	动态加载的驱动或功能模块
+依赖关系	依赖内核启动顺序	依赖模块加载顺序
+卸载支持	不支持（随内核运行直到系统关闭）	支持（通过 module_exit 卸载）
+
+总结
+要是你开发的代码需要在内核启动时初始化，并且会被编译进内核，那就该选用subsys_initcall。
+如果你开发的是可动态加载和卸载的内核模块，那么module_init是更合适的选择。
+这两个宏本质上都是对初始化函数进行注册，只是注册的时机和方式有所不同。
+*/
 #if IS_BUILTIN(CONFIG_MTK_CHARGER)
 subsys_initcall(charger_class_init);
 #else
