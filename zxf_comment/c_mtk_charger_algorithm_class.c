@@ -4,6 +4,32 @@
  * Author Wy Chuang<wy.chuang@mediatek.com>
  */
 
+ /*
+功能：提供一组通用接口供不同充电算法使用，包括注册、注销、属性设置、事件通知等。
+设备模型：通过 class_create() 创建了一个名为 "Charger Algorithm" 的设备类，并实现了相关 sysfs 接口。
+通知机制：基于内核的通知链（notifier chain），允许其他模块监听充电算法的事件（如插拔、满电等）。
+导出符号：所有关键函数都通过 EXPORT_SYMBOL 导出，可供其他模块调用。
+
+六、核心设计特点
+面向对象设计：
+	通过struct chg_alg_device封装设备状态
+	通过struct chg_alg_ops定义算法操作接口
+	实现了 "接口与实现分离" 的设计原则
+事件通知机制：
+	使用notifier_block实现观察者模式
+	支持异步事件通知（如充电状态变化）
+灵活的加载方式：
+	支持作为内置模块或可加载模块两种部署方式
+	通过条件编译适配不同场景
+错误处理机制：
+	严格检查指针有效性
+	对未实现的接口返回标准错误码
+	提供清晰的错误日志
+总结
+这段代码实现了 MediaTek 充电算法的核心框架，定义了一套标准化的充电算法接口。它通过设备类机制将充电算法抽象为内核设备，提供了统一的管理接口。该模块既可以作为内置模块在内核启动时初始化，也可以作为可加载模块动态加载，体现了 Linux 内核驱动开发的灵活性和规范性。
+
+实际使用时，具体的充电算法（如 PE5、PD 等）需要实现struct chg_alg_ops中的接口，并通过chg_alg_device_register注册到系统中，从而接入这套充电管理框架。
+ */
 #include <linux/module.h>
 #include <linux/stat.h>
 #include <linux/init.h>
@@ -15,6 +41,9 @@
 
 static struct class *charger_algorithm_class;
 
+/*
+将每个事件编号（如 EVT_PLUG_IN）映射为字符串名，方便调试打印。
+*/
 static const char *const chg_alg_notify_evt_name[EVT_MAX] = {
 	[EVT_PLUG_IN] = "EVT_PLUG_IN",
 	[EVT_PLUG_OUT] = "EVT_PLUG_OUT",
@@ -130,6 +159,19 @@ int chg_alg_stop_algo(struct chg_alg_device *alg_dev)
 }
 EXPORT_SYMBOL(chg_alg_stop_algo);
 
+/*
+实现逻辑与流程
+参数有效性检查：
+	检查alg_dev指针是否为空
+	检查设备操作接口alg_dev->ops是否初始化
+	检查notifier_call回调函数是否存在
+事件分发机制：
+	若参数有效，调用具体算法实现的notifier_call回调函数
+	该回调函数负责将notify中的事件分发给所有注册的观察者
+错误处理：
+	若任意检查失败，返回-EOPNOTSUPP（不支持的操作）
+	确保代码健壮性，避免空指针解引用
+*/
 int chg_alg_notifier_call(struct chg_alg_device *alg_dev,
 	struct chg_alg_notify *notify)
 {
@@ -175,8 +217,7 @@ char *chg_alg_state_to_str(int state)
 	default:
 		break;
 	}
-	pr_notice("%s unknown state:%d\n", __func__
-		, state);
+	pr_notice("%s unknown state:%d\n", __func__, state);
 	return "chg_alg_state_UNKNOWN";
 }
 EXPORT_SYMBOL(chg_alg_state_to_str);
@@ -222,6 +263,7 @@ EXPORT_SYMBOL(unregister_chg_alg_notifier);
  * Creates and registers new charger device. Returns either an
  * ERR_PTR() or a pointer to the newly allocated device.
  */
+//可参考charger_class.c的介绍
 struct chg_alg_device *chg_alg_device_register(const char *name,
 		struct device *parent, void *devdata,
 		const struct chg_alg_ops *ops,
@@ -234,15 +276,16 @@ struct chg_alg_device *chg_alg_device_register(const char *name,
 	char *algo_name = NULL;
 
 	pr_debug("%s: name=%s\n", __func__, name);
-	chg_dev = kzalloc(sizeof(*chg_dev), GFP_KERNEL);
+	chg_dev = kzalloc(sizeof(*chg_dev), GFP_KERNEL);	// 分配设备结构体
 	if (!chg_dev)
 		return ERR_PTR(-ENOMEM);
 
 	head = &chg_dev->evt_nh;
 	srcu_init_notifier_head(head);
-	/* Rename srcu's lock to avoid LockProve warning */
+	/* Rename srcu's lock to avoid LockProve warning // 初始化通知链和互斥锁*/
 	lockdep_init_map(&(&head->srcu)->dep_map, name, &key, 0);
 	mutex_init(&chg_dev->ops_lock);
+	// 配置设备属性
 	chg_dev->dev.class = charger_algorithm_class;
 	chg_dev->dev.parent = parent;
 	chg_dev->dev.release = chg_alg_device_release;
@@ -256,6 +299,7 @@ struct chg_alg_device *chg_alg_device_register(const char *name,
 		memcpy(&chg_dev->props, props,
 		       sizeof(struct chg_alg_properties));
 	}
+	// 注册设备到系统
 	rc = device_register(&chg_dev->dev);
 	if (rc) {
 		kfree(chg_dev);
@@ -323,8 +367,11 @@ static void __exit charger_algorithm_class_exit(void)
 
 static int __init charger_algorithm_class_init(void)
 {
-	charger_algorithm_class =
-		class_create(THIS_MODULE, "Charger Algorithm");
+	/*
+	t7820_l40mme_T1036_64:/sys/class/Charger Algorithm # ls
+	pd  pe  pe2
+	*/
+	charger_algorithm_class = class_create(THIS_MODULE, "Charger Algorithm");
 	if (IS_ERR(charger_algorithm_class)) {
 		pr_notice("Unable to create charger algorithm class; errno = %ld\n",
 			PTR_ERR(charger_algorithm_class));
