@@ -175,7 +175,14 @@ bool is_algo_active(struct mtk_battery *gm)
 	return gm->algo.active;
 }
 
-
+//根据电池 ID 电阻（ADC 电压）的值判断当前使用的是哪种类型的电池，并设置对应的电池 profile ID。
+/*
+核心变量说明
+变量	  		类型			用途
+batid_adc_fail	全局变量	表示 ADC 是否出错（1 表示失败）
+batid_channel	struct iio_channel *	指向 IIO 子系统的通道，用于读取 ADC 值
+bat_id	全局变量	保存最终识别出的电池类型 ID（0 或 1）
+*/
 int fgauge_get_profile_id(struct mtk_battery *gm)
 {
 #ifdef CHGTMP_BATID
@@ -997,8 +1004,7 @@ int force_get_tbat(struct mtk_battery *gm, bool update)
 /* ============================================================ */
 /* gaugel hal interface */
 /* ============================================================ */
-int gauge_get_property(enum gauge_property gp,
-	int *val)
+int gauge_get_property(enum gauge_property gp, int *val)
 {
 	struct mtk_gauge *gauge;
 	struct power_supply *psy;
@@ -1019,7 +1025,7 @@ int gauge_get_property(enum gauge_property gp,
 		return -EOPNOTSUPP;
 	}
 
-	attr = gauge->attr;
+	attr = gauge->attr;	//gauge->attr 是一个数组，每个元素对应一个 Gauge 属性（如电压、电流等），包含对应的读取函数。
 	if (attr == NULL) {
 		bm_err("%s attr =NULL\n", __func__);
 		return -ENODEV;
@@ -1081,6 +1087,10 @@ int gauge_set_property(enum gauge_property gp,
 /* load .h/dtsi */
 /* ============================================================ */
 
+/*
+从头文件（header）中加载电池管理模块的自定义配置参数，并初始化 mtk_battery 结构体中
+的 fuel_gauge_custom_data 和 fuel_gauge_table_custom_data 字段
+*/
 void fg_custom_init_from_header(struct mtk_battery *gm)
 {
 	int i, j;
@@ -1088,6 +1098,7 @@ void fg_custom_init_from_header(struct mtk_battery *gm)
 	struct fuel_gauge_table_custom_data *fg_table_cust_data;
 	int version = 0;
 
+	//从 mtk_battery 中获取自定义数据结构体的地址，后续用于填充数据
 	fg_cust_data = &gm->fg_cust_data;
 	fg_table_cust_data = &gm->fg_table_cust_data;
 
@@ -1107,7 +1118,7 @@ void fg_custom_init_from_header(struct mtk_battery *gm)
 	fg_cust_data->q_max_L_current = Q_MAX_L_CURRENT;
 	fg_cust_data->q_max_H_current = Q_MAX_H_CURRENT;
 	fg_cust_data->q_max_sys_voltage =
-		UNIT_TRANS_10 * g_Q_MAX_SYS_VOLTAGE[gm->battery_id];
+		UNIT_TRANS_10 * g_Q_MAX_SYS_VOLTAGE[gm->battery_id];	//根据当前电池 ID 获取对应的系统电压。
 
 	fg_cust_data->pseudo1_en = PSEUDO1_EN;
 	fg_cust_data->pseudo100_en = PSEUDO100_EN;
@@ -1458,6 +1469,7 @@ void fg_custom_init_from_header(struct mtk_battery *gm)
 }
 
 #if IS_ENABLED(CONFIG_OF)
+//从设备树节点中读取一个无符号 32 位整数，并乘以一个单位系数，然后保存到指定的参数指针中。
 static int fg_read_dts_val(const struct device_node *np,
 		const char *node_srting,
 		int *param, int unit)
@@ -1617,7 +1629,7 @@ void fg_custom_init_from_dts(struct platform_device *dev,
 		__func__, gm->ptim_lk_v, gm->ptim_lk_i, gm->pl_shutdown_time);
 
 	fg_cust_data->disable_nafg =
-		of_property_read_bool(np, "DISABLE_NAFG");
+		of_property_read_bool(np, "DISABLE_NAFG");	//of_property_read_bool的详细解释见c_mtk_charger.c
 	bm_err("disable_nafg:%d\n",
 		fg_cust_data->disable_nafg);
 
@@ -3555,44 +3567,60 @@ int battery_psy_init(struct platform_device *pdev)
 	return 0;
 }
 
+/*
+这个函数的作用是从设备树中读取启动时传下来的 bootmode 和 boottype，并将它们保存到 mtk_battery 结构体中，
+供电池驱动根据不同的启动模式做出不同处理（例如不更新电量、跳过某些初始化流程等）。
+*/
 void fg_check_bootmode(struct device *dev,
 	struct mtk_battery *gm)
 {
 	struct device_node *boot_node = NULL;
 	struct tag_bootmode *tag = NULL;
 
-	boot_node = of_parse_phandle(dev->of_node, "bootmode", 0);
+	boot_node = of_parse_phandle(dev->of_node, "bootmode", 0);	//md文档有详细解释，使用 of_parse_phandle() 函数从当前设备的设备树节点中查找名为 "bootmode" 的子节点。
 	if (!boot_node)
 		bm_err("%s: failed to get boot mode phandle\n", __func__);
 	else {
 		tag = (struct tag_bootmode *)of_get_property(boot_node,
-							"atag,boot", NULL);
+							"atag,boot", NULL);	//使用 of_get_property() 函数从 boot_node 中提取属性为 "atag,boot" 的数据
 		if (!tag)
 			bm_err("%s: failed to get atag,boot\n", __func__);
 		else {
 			bm_err("%s: size:0x%x tag:0x%x bootmode:0x%x boottype:0x%x\n",
 				__func__, tag->size, tag->tag,
 				tag->bootmode, tag->boottype);
+			
+			//将 bootmode 和 boottype 保存到 mtk_battery 结构体中，供后续使用。
 			gm->bootmode = tag->bootmode;
 			gm->boottype = tag->boottype;
 		}
 	}
 }
 
+/*
+它的作用是从 设备树（Device Tree）中读取来自 Bootloader（LK/Preloader）阶段传递过来的电池信息，包括：
+	软件开路电压（SW OCV）对应的电压值
+	SW OCV 对应的电流值
+	关机时间戳（shutdown time）
+这些信息通常是在 系统从 Bootloader（LK）启动时采集的电池状态，用于在 Linux 内核启动初期为电池管理系统提供一个初始参考值。
+*/
 void fg_check_lk_swocv(struct device *dev,
 	struct mtk_battery *gm)
 {
 	struct device_node *boot_node = NULL;
 	int len = 0;
-	char temp[10];
+	char temp[10];	//临时缓冲区，用于字符串转换
 	int *prop;
 
 	boot_node = of_parse_phandle(dev->of_node, "bootmode", 0);
 	if (!boot_node)
 		bm_err("%s: failed to get boot mode phandle\n", __func__);
 	else {
-		prop = (void *)of_get_property(
-			boot_node, "atag,fg_swocv_v", &len);
+		/*
+		从 "bootmode" 节点中读取 "atag,fg_swocv_v" 属性，表示 LK 阶段记录的电池电压。
+		将其转为字符串后用 kstrtoint() 转换为整数，保存到 gm->ptim_lk_v 中。
+		*/
+		prop = (void *)of_get_property(boot_node, "atag,fg_swocv_v", &len);
 
 		if (prop == NULL) {
 			bm_err("fg_swocv_v prop == NULL, len=%d\n", len);
@@ -3614,6 +3642,7 @@ void fg_check_lk_swocv(struct device *dev,
 			bm_err("temp %s gm->ptim_lk_i=%d\n",
 				temp, gm->ptim_lk_i);
 		}
+
 		prop = (void *)of_get_property(
 			boot_node, "atag,shutdown_time", &len);
 
@@ -3631,6 +3660,18 @@ void fg_check_lk_swocv(struct device *dev,
 		__func__, gm->ptim_lk_v, gm->ptim_lk_i, gm->pl_shutdown_time);
 }
 
+/*
+battery_init() 是电池驱动的初始化入口，它完成了以下关键任务：
+
+	功能					描述
+数据结构初始化				初始化 mtk_battery 和 mtk_gauge 相关字段
+Coulomb 计数				初始化 1% 充放电中断回调
+温度表						加载电池温度校准表
+线程与定时器				创建线程和定时器用于周期性更新
+用户空间接口				创建 sysfs 节点、注册 power supply
+电源状态监听				注册 PM Notifier 监听系统休眠
+Daemon 或 Kernel 算法		根据配置决定使用用户空间还是内核管理
+*/
 int battery_init(struct platform_device *pdev)
 {
 	int ret = 0;
@@ -3638,34 +3679,39 @@ int battery_init(struct platform_device *pdev)
 	struct mtk_battery *gm;
 	struct mtk_gauge *gauge;
 
-	gauge = dev_get_drvdata(&pdev->dev);
+	gauge = dev_get_drvdata(&pdev->dev);	//从设备结构体中取出之前由驱动保存的私有数据（在这里是一个 mtk_gauge 类型的指针），以便后续使用
 	gm = gauge->gm;
 	gm->fixed_bat_tmp = 0xffff;
-	gm->tmp_table = fg_temp_table;
+	gm->tmp_table = fg_temp_table;	//ntc曲线表，在mtk_battery_table.h中
 	gm->log_level = BMLOG_ERROR_LEVEL;
 	gm->sw_iavg_gap = 3000;
 	gm->in_sleep = false;
 	mutex_init(&gm->fg_update_lock);
 
-	init_waitqueue_head(&gm->wait_que);
+	init_waitqueue_head(&gm->wait_que);	//初始化等待队列
 
-	fg_check_bootmode(&pdev->dev, gm);
-	fg_check_lk_swocv(&pdev->dev, gm);
+	fg_check_bootmode(&pdev->dev, gm);	//判断当前是否处于 recovery 模式
+	fg_check_lk_swocv(&pdev->dev, gm);	//从 LK（preloader）阶段读取软件 OCV 值。
+
+	//从头文件或设备树（Device Tree）中加载自定义电池配置，比如容量、温度阈值等。
 	fg_custom_init_from_header(gm);
 	fg_custom_init_from_dts(pdev, gm);
+
+	//初始化 Coulomb 计数中断机制，用于检测充放电 1% 变化。
 	gauge_coulomb_service_init(gm);
 	gm->coulomb_plus.callback = fg_coulomb_int_h_handler;
 	gauge_coulomb_consumer_init(&gm->coulomb_plus, &pdev->dev, "car+1%");
 	gm->coulomb_minus.callback = fg_coulomb_int_l_handler;
 	gauge_coulomb_consumer_init(&gm->coulomb_minus, &pdev->dev, "car-1%");
 
+	//当 UI 显示的电量变化 1% 时触发通知。
 	gauge_coulomb_consumer_init(&gm->uisoc_plus, &pdev->dev, "uisoc+1%");
 	gm->uisoc_plus.callback = fg_bat_int2_h_handler;
 	gauge_coulomb_consumer_init(&gm->uisoc_minus, &pdev->dev, "uisoc-1%");
 	gm->uisoc_minus.callback = fg_bat_int2_l_handler;
 
 
-
+	//初始化定时器及工作队列
 	alarm_init(&gm->tracking_timer, ALARM_BOOTTIME,
 		tracking_timer_callback);
 	INIT_WORK(&gm->tracking_timer_work, tracking_timer_work_handler);
@@ -3677,9 +3723,11 @@ int battery_init(struct platform_device *pdev)
 		sw_uisoc_timer_callback);
 	INIT_WORK(&gm->sw_uisoc_timer_work, sw_uisoc_timer_work_handler);
 
+	//启动电池主线程（可选）
 	if (!gm->disableGM30)
 		kthread_run(battery_update_routine, gm, "battery_thread");
 
+//注册系统电源管理通知（PM Notifier）
 #ifdef CONFIG_PM
 	gm->pm_nb.notifier_call = system_pm_notify;
 	ret = register_pm_notifier(&gm->pm_nb);
@@ -3689,19 +3737,22 @@ int battery_init(struct platform_device *pdev)
 	}
 #endif /* CONFIG_PM */
 
-	fg_drv_thread_hrtimer_init(gm);
+	fg_drv_thread_hrtimer_init(gm);	//用于更精确的时间控制，比如电池状态追踪
 
 	if (!gm->disable_bs_psy)
-		battery_sysfs_create_group(gm->bs_data.psy);
+		battery_sysfs_create_group(gm->bs_data.psy);	//创建 /sys/class/power_supply/battery/ 下的节点，供调试和查看电池状态。
 
-	/* for gauge hal hw ocv */
+	/* for gauge hal hw ocv 获取初始电池温度并初始化 Misc 子系统 */
 	gm->bs_data.bat_batt_temp = force_get_tbat(gm, true);
 	mtk_power_misc_init(gm);
 
+	//初始化 Battery Daemon（用户空间服务）
 	ret = mtk_battery_daemon_init(pdev);
 	b_recovery_mode = is_recovery_mode();
 	gm->is_probe_done = true;
 	mtk_battery_external_power_changed(gm->bs_data.psy);
+
+	//判断使用哪种电池管理方式,如果 daemon 成功启动且非 recovery 模式，使用用户空间管理, 否则，使用内核算法进行电池管理（Kernel Mode Gauge）。
 	if (ret == 0 && b_recovery_mode == 0)
 		bm_err("[%s]: daemon mode DONE\n", __func__);
 	else {
