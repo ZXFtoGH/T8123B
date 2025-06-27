@@ -2,8 +2,14 @@
 /*
  * Copyright (c) 2019 MediaTek Inc.
  * Author Wy Chuang<wy.chuang@mediatek.com>
- */
+*/
 
+/*
+本文件创建的节点有哪些：
+device_create_file 创建了 emdoor_battery_id 节点。
+power_supply_register 创建了 battery 设备节点，并在其中定义了多个电源属性。生成如 /sys/class/power_supply/battery/ 下的标准属性节点（如 capacity、voltage_now 等）
+battery_sysfs_create_group 在 battery 设备节点下创建了自定义的 sysfs 属性组，包括 temperature、coulomb_int_gap、uisoc 等属性。
+ */
 #include <linux/cdev.h>		/* cdev */
 #include <linux/err.h>	/* IS_ERR, PTR_ERR */
 #include <linux/init.h>		/* For init/exit macros */
@@ -133,18 +139,32 @@ void disable_gauge_irq(struct mtk_gauge *gauge,
 		disable_irq_nosync(gauge->irq_no[irq]);
 }
 
+//从名为 "mtk-gauge" 的电源设备中，获取 mtk_battery 类型的全局上下文结构体指针，用于后续访问电池管理相关的数据和操作函数。
+/*
+[调用 get_mtk_battery()]
+         ↓
+[通过 power_supply_get_by_name("mtk-gauge") 获取电源设备]
+         ↓
+[检查电源设备是否存在]
+         ↓
+[通过 power_supply_get_drvdata() 获取私有数据指针 mtk_gauge]
+         ↓
+[检查 mtk_gauge 是否存在]
+         ↓
+[返回 mtk_gauge.gm -> struct mtk_battery *]
+*/
 struct mtk_battery *get_mtk_battery(void)
 {
 	struct mtk_gauge *gauge;
 	struct power_supply *psy;
 
-	psy = power_supply_get_by_name("mtk-gauge");
+	psy = power_supply_get_by_name("mtk-gauge");	//通过名字 "mtk-gauge" 查找并获取对应的电源设备对象（power_supply），以便后续操作该设备的属性和功能。,获取名为 "mtk-gauge" 的电源设备对象指针，从而可以访问它的属性和私有数据，用于电池状态管理。
 	if (psy == NULL) {
 		bm_err("[%s]psy is not rdy\n", __func__);
 		return NULL;
 	}
 
-	gauge = (struct mtk_gauge *)power_supply_get_drvdata(psy);
+	gauge = (struct mtk_gauge *)power_supply_get_drvdata(psy);//每个电源设备可以关联一个私有数据指针（driver_data），这里获取的是 mtk_gauge 类型的结构体。
 	if (gauge == NULL) {
 		bm_err("[%s]mtk_gauge is not rdy\n", __func__);
 		return NULL;
@@ -235,10 +255,26 @@ static ssize_t emdoor_battery_id_show(struct device *dev, struct device_attribut
 	return sprintf(buf, "%d\n", gm->battery_id);
 }
 DEVICE_ATTR_RO(emdoor_battery_id);
-int wakeup_fg_algo_cmd(
-	struct mtk_battery *gm, unsigned int flow_state, int cmd, int para1)
-{
 
+/*
+根据当前系统状态，选择立即执行 Fuel Gauge 算法或唤醒后台线程来异步执行，确保在合适的时间点更新电池电量信息。
+
+[wakeup_fg_algo_cmd()]
+         ↓
+[打印调试信息]
+         ↓
+[是否 disableGM30？是 → 返回 -1]
+         ↓
+[is_algo_active() 是否允许立即执行？]
+        /               \
+     是                  否
+   ↓                      ↓
+[do_fg_algo()]       [wakeup_fg_daemon()]
+         ↓                   ↓
+[电量算法执行]       [后台线程稍后执行]
+*/
+int wakeup_fg_algo_cmd(struct mtk_battery *gm, unsigned int flow_state, int cmd, int para1)
+{
 	bm_debug("[%s] 0x%x %d %d\n", __func__, flow_state, cmd, para1);
 	if (gm->disableGM30) {
 		bm_err("FG daemon is disabled\n");
@@ -247,7 +283,7 @@ int wakeup_fg_algo_cmd(
 	if (is_algo_active(gm) == true)
 		do_fg_algo(gm, flow_state);
 	else
-		wakeup_fg_daemon(flow_state, cmd, para1);
+		wakeup_fg_daemon(flow_state, cmd, para1);	//唤醒后台线程异步处理
 
 	return 0;
 }
@@ -299,9 +335,7 @@ int dump_pseudo100(enum charge_sel select)
 		return 0;
 
 	for (i = 0; i < MAX_TABLE; i++) {
-		bm_err("%6d\n",
-			gm->fg_table_cust_data.fg_profile[
-				i].r_pseudo100.pseudo[select]);
+		bm_err("%6d\n", gm->fg_table_cust_data.fg_profile[i].r_pseudo100.pseudo[select]);
 	}
 
 	return 0;
@@ -359,6 +393,17 @@ static enum power_supply_property battery_props[] = {
 	POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE,
 };
 
+/*
+battery_psy_get_property 函数的主要功能是根据请求的属性类型（enum power_supply_property），从电池驱动中获取相应的属性值，并将其存储在 union power_supply_propval 结构中
+
+这是电池电源设备的 .get_property 回调函数，在用户空间读取电池属性文件（如 /sys/class/power_supply/battery/capacity）或 Android Framework 请求电池信息时被调用，用来返回当前电池的状态（电量、电压、温度等）。
+
+🔍 参数说明：
+参数	类型	说明
+psy	struct power_supply *	当前操作的电源设备对象
+psp	enum power_supply_property	要获取的属性类型，比如 POWER_SUPPLY_PROP_CAPACITY
+val	union power_supply_propval *	输出参数，保存要返回的属性值
+*/
 static int battery_psy_get_property(struct power_supply *psy,
 	enum power_supply_property psp,
 	union power_supply_propval *val)
@@ -561,6 +606,23 @@ static int battery_psy_get_property(struct power_supply *psy,
 	return ret;
 }
 
+/*
+[用户空间设置充电电压]
+           ↓
+[sysfs 写入 -> power_supply_store_property()]
+           ↓
+[power_supply_set_property()]
+           ↓
+[battery_psy_set_property()] ← 就是这个函数
+           ↓
+[switch 分支判断属性类型]
+           ↓
+[如果是 POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE]
+           ↓
+[wakeup_fg_algo_cmd() 触发 Fuel Gauge 算法]
+           ↓
+[完成设置并返回结果]
+*/
 static int battery_psy_set_property(struct power_supply *psy,
 	enum power_supply_property psp,
 	const union power_supply_propval *val)
@@ -826,11 +888,21 @@ int volttotemp(struct mtk_battery *gm, int dwVolt, int volt_cali)
 	return sbattmp;
 }
 
+/*
+获取当前电池温度（单位：℃），并进行电流补偿和异常检测处理。
+
+功能亮点总结
+	特性		描述
+✅ 电流补偿	根据电流方向修正电压值，提升温度测量精度
+✅ 异常检测	防止短时间内温度突变造成的误判
+✅ 缓存机制	提高效率，减少频繁采样带来的开销
+✅ 日志输出	提供详细的调试信息，便于分析
+*/
 int force_get_tbat_internal(struct mtk_battery *gm, bool update)
 {
 	int bat_temperature_volt = 2;
 	int bat_temperature_val = 0;
-	static int pre_bat_temperature_val = -1;
+	static int pre_bat_temperature_val = -1;	//使用 static 的变量保存上一次的测量结果，用于比较或异常检测
 	int fg_r_value = 0;
 	int fg_meter_res_value = 0;
 	int fg_current_temp = 0;
@@ -875,6 +947,7 @@ int force_get_tbat_internal(struct mtk_battery *gm, bool update)
 			fg_current_temp = abs(fg_current_temp) / 10;
 
 			if (fg_current_state == true) {
+				// 放电时减去压降
 				bat_temperature_volt_temp =
 					bat_temperature_volt;
 				bat_temperature_volt =
@@ -887,6 +960,7 @@ int force_get_tbat_internal(struct mtk_battery *gm, bool update)
 					(fg_meter_res_value + fg_r_value))
 						/ 10000);
 			} else {
+				// 充电时加上压降
 				bat_temperature_volt_temp =
 					bat_temperature_volt;
 				bat_temperature_volt =
@@ -902,7 +976,7 @@ int force_get_tbat_internal(struct mtk_battery *gm, bool update)
 			bat_temperature_val =
 				volttotemp(gm,
 				bat_temperature_volt,
-				vol_cali);
+				vol_cali);	//将电压值转化为摄氏度，该函数内部可能使用查表法或公式法（NTC 热敏电阻计算公式）。
 		}
 
 		bm_notice("[%s] %d,%d,%d,%d,%d,%d r:%d %d %d\n",
@@ -2816,6 +2890,38 @@ static void fg_drv_update_hw_status(struct mtk_battery *gm)
 	hrtimer_start(&gm->fg_hrtimer, ktime, HRTIMER_MODE_REL);
 }
 
+//这是一个内核线程函数，负责监听电池更新事件，并调用底层驱动更新硬件状态。
+/*
+工作流程图示意
+深色版本
+[线程启动] 
+     ↓
+[battery_update_psd()]
+     ↓
+[进入 while(1)]
+     ↓
+[等待 fg_update_flag > 0 且未休眠]
+     ↓
+[加锁]
+     ↓
+[判断是否休眠？是 → 解锁 & 回到循环开头]
+     ↓
+[清除 flag]
+     ↓
+[调用 fg_drv_update_hw_status()]
+     ↓
+[解锁]
+     ↓
+[回到循环等待下次事件]
+
+
+场景				描述
+电量变化通知	当电池电量发生变化时唤醒线程更新数据
+充电/放电动作	触发 FG 更新以提供更精确的电量估算
+用户查看电池状态	在 Android 设置界面查看电量时，后台已准备好最新数据
+系统休眠恢复	唤醒后自动更新电池状态，避免显示旧数据
+*/
+
 int battery_update_routine(void *arg)
 {
 	struct mtk_battery *gm = (struct mtk_battery *)arg;
@@ -2915,6 +3021,19 @@ static void tracking_timer_work_handler(struct work_struct *data)
 	wakeup_fg_algo(gm, FG_INTR_FG_TIME);
 }
 
+/*
+这个函数是电池管理模块中的一个定时器回调函数，当定时器到期后，它会调度一个工作队列任务去处理后续操作，比如更新电池状态、记录数据等。
+
+[定时器到期] 
+     ↓
+[调用 tracking_timer_callback]
+     ↓
+[打印调试信息]
+     ↓
+[schedule_work(&gm->tracking_timer_work)]
+     ↓
+[在 workqueue 中执行真正的处理逻辑]
+*/
 static enum alarmtimer_restart tracking_timer_callback(
 	struct alarm *alarm, ktime_t now)
 {
@@ -2923,6 +3042,11 @@ static enum alarmtimer_restart tracking_timer_callback(
 	gm = container_of(alarm,
 		struct mtk_battery, tracking_timer);
 	bm_debug("[%s]\n", __func__);
+	/*
+	调用 schedule_work() 来调度一个下半部任务（workqueue），即把实际处理逻辑交给 tracking_timer_work 去异步执行。
+	tracking_timer_work 是一个 struct work_struct 类型的成员，属于 mtk_battery 结构体。
+	这样做是为了避免在中断上下文中执行复杂操作。
+	*/
 	schedule_work(&gm->tracking_timer_work);
 	return ALARMTIMER_NORESTART;
 }
