@@ -653,6 +653,36 @@ static int battery_psy_set_property(struct power_supply *psy,
 	return ret;
 }
 
+/*
+这个函数的主要作用包括：
+	功能				描述
+✅ 检测是否正在充电	获取充电设备的 ONLINE 和 STATUS 属性
+✅ 更新电池状态	设置为 CHARGING / DISCHARGING / FULL
+✅ 判断是否充满	如果充满，则通知系统并唤醒算法
+✅ 判断充电器插拔事件	根据 POWER_SUPPLY_PROP_USB_TYPE 判断是插入还是拔出
+✅ 触发电量估算算法	当充电器插入或电压变化时唤醒 FG 算法线程
+✅ 记录日志信息	输出调试日志，便于分析问题
+
+[外部电源变化]
+         ↓
+[mtk_battery_external_power_changed()]
+         ↓
+[获取充电器对象]
+         ↓
+[获取充电器状态（online/status/vbat0）]
+         ↓
+[根据状态设置电池状态（charging/discharge/full）]
+         ↓
+[判断是否充满，触发 EOC 处理]
+         ↓
+[更新电池状态（通知 Framework）]
+         ↓
+[判断充电器插拔事件]
+         ↓
+[判断电压变化，触发 FG 校准算法]
+         ↓
+[输出调试日志]
+*/
 void mtk_battery_external_power_changed(struct power_supply *psy)
 {
 	struct mtk_battery *gm;
@@ -685,6 +715,11 @@ void mtk_battery_external_power_changed(struct power_supply *psy)
 		bm_err("%s retry to get chg_psy\n", __func__);
 		bs_data->chg_psy = chg_psy;
 	} else {
+		/*
+		获取充电状态属性
+		ONLINE：表示是否有充电器插入。
+		STATUS：表示当前充电状态（充电中、满电、未充电等）。
+		*/
 		ret = power_supply_get_property(chg_psy,
 			POWER_SUPPLY_PROP_ONLINE, &online);
 
@@ -694,6 +729,7 @@ void mtk_battery_external_power_changed(struct power_supply *psy)
 		ret = power_supply_get_property(chg_psy,
 			POWER_SUPPLY_PROP_ENERGY_EMPTY, &vbat0);
 
+		//根据充电状态设置电池状态
 		if (!online.intval) {
 			bs_data->bat_status = POWER_SUPPLY_STATUS_DISCHARGING;
 		} else {
@@ -727,6 +763,11 @@ void mtk_battery_external_power_changed(struct power_supply *psy)
 #endif			
 			fg_sw_bat_cycle_accu(gm);
 		}
+
+		/*
+		如果是第一次进入充满状态（EoC），则执行 EoC 相关逻辑（如记录时间戳）。
+		调用 notify_fg_chr_full() 通知 Fuel Gauge 子系统电池已充满。
+		*/
 
 		if (status.intval == POWER_SUPPLY_STATUS_FULL
 			&& gm->b_EOC != true) {
@@ -774,21 +815,39 @@ void mtk_battery_external_power_changed(struct power_supply *psy)
 
 }
 EXPORT_SYMBOL_GPL(mtk_battery_external_power_changed);
+
+/*
+battery_service_data_init() 是用于 初始化电池电源设备的描述信息和默认状态，以便后续通过 power_supply_register() 注册电池设备到系统中。
+
+[battery_probe()]
+         ↓
+[分配 mtk_battery 结构体]
+         ↓
+[battery_service_data_init(gm)] ← 就是这个函数
+         ↓
+[注册电源设备]
+   power_supply_register(&pdev->dev, &bs_data->psd, &gm->psy_cfg);
+         ↓
+[电池设备出现在 /sys/class/power_supply/battery/]
+*/
 void battery_service_data_init(struct mtk_battery *gm)
 {
+	//获取电池数据结构指针
 	struct battery_data *bs_data;
-
 	bs_data = &gm->bs_data;
-	bs_data->psd.name = "battery",
+
+	//初始化电源设备描述符（.psd）
+	bs_data->psd.name = "battery",	//设置电源设备名称为 "battery"，这样在 /sys/class/power_supply/ 下就会生成 battery 子目录。
 	bs_data->psd.type = POWER_SUPPLY_TYPE_BATTERY;
-	bs_data->psd.properties = battery_props;
+	bs_data->psd.properties = battery_props;	//.properties 指定支持哪些属性（如电量、电压、温度等），这些属性定义在一个数组 battery_props[] 中。
 	bs_data->psd.num_properties = ARRAY_SIZE(battery_props);
-	bs_data->psd.get_property = battery_psy_get_property;
+	bs_data->psd.get_property = battery_psy_get_property;	//设置 .get_property 和 .set_property 回调函数，分别用于读取和写入电池属性。
 	bs_data->psd.set_property = battery_psy_set_property;
 	bs_data->psd.external_power_changed =
-		mtk_battery_external_power_changed;
-	bs_data->psy_cfg.drv_data = gm;
+		mtk_battery_external_power_changed;	//当外部电源（如充电器）发生变化时会调用这个回调函数（比如插入或拔出充电线）。
+	bs_data->psy_cfg.drv_data = gm;//.drv_data 是电源设备的私有数据指针，这里指向 mtk_battery 上下文结构体。这样在回调函数中可以通过 power_supply_get_drvdata(psy) 获取到 gm
 
+	//初始化电池状态字段（默认值)
 	bs_data->bat_status = POWER_SUPPLY_STATUS_DISCHARGING,
 	bs_data->bat_health = POWER_SUPPLY_HEALTH_GOOD,
 	bs_data->bat_present = 1,
@@ -797,20 +856,55 @@ void battery_service_data_init(struct mtk_battery *gm)
 	bs_data->bat_batt_vol = 0,
 	bs_data->bat_batt_temp = 0,
 
+	//初始化 UI 层显示电量（fixed_uisoc）
+	/*
+	fixed_uisoc 是一个标志位，用于控制是否固定显示某个电量百分比（常用于调试或 MMI 测试模式）。
+	0xffff 通常作为一个特殊值，表示“不固定”，使用真实电量。
+	*/
 	gm->fixed_uisoc = 0xffff;
 }
 
 /* ============================================================ */
-/* voltage to battery temperature */
+/* voltage to battery temperature 将电池温度对应的 ADC 电阻值（res）转换为实际的温度值（单位：摄氏度）。*/
 /* ============================================================ */
+/*
+功能一句话总结：
+根据一个电阻值 res，通过查表和线性插值算法，计算出当前电池的温度值。
+
+参数说明：
+struct mtk_battery *gm：MediaTek 电池管理系统的核心上下文结构体。
+int res：从 ADC 获取到的电池温度检测电阻值（通常来自 NTC 热敏电阻）。
+
+[输入电阻值 res]
+         ↓
+[获取温度-电阻对照表]
+         ↓
+[是否超出最大/最小范围？]
+         ↓ yes
+[返回边界温度（-20℃ 或 60℃）]
+
+         ↓ no
+[遍历查找匹配区间（res1-res2）]
+         ↓
+[使用线性插值计算具体温度]
+         ↓
+[返回计算后的温度值]
+*/
 int adc_battemp(struct mtk_battery *gm, int res)
 {
+	/*
+	i：用于循环查表的索引。
+	res1, res2：记录两个相邻的参考电阻值。
+	tmp1, tmp2：对应的两个参考温度值。
+	tbatt_value：最终计算出的温度值。
+	ptable：指向一个温度-电阻对照表的指针。
+	*/
 	int i = 0;
 	int res1 = 0, res2 = 0;
 	int tbatt_value = -200, tmp1 = 0, tmp2 = 0;
 	struct fg_temp *ptable;
 
-	ptable = gm->tmp_table;
+	ptable = gm->tmp_table;	//获取温度对照表，tmp_table 是一个预定义好的温度-电阻对照表（通常是结构体数组,在mtk_battery_table.h中
 	if (res >= ptable[0].TemperatureR) {
 		tbatt_value = -20;
 	} else if (res <= ptable[40].TemperatureR) {
@@ -842,8 +936,38 @@ int adc_battemp(struct mtk_battery *gm, int res)
 	return tbatt_value;
 }
 
+/*
+volttotemp() 是一个将 ADC 采集到的电压值转换为电池温度值的函数，它通过分压公式计算电阻值，并调用 adc_battemp() 查表插值得出温度。
+
+[输入电压值 dwVolt]
+          ↓
+[获取 pull-up 电阻 rbat_pull_up_r]
+          ↓
+[尝试获取 BIF 真实电压 vbif28]
+          ↓
+[计算电压差 delta_v]
+          ↓
+[根据分压公式计算电阻值 R_NTC]
+          ↓
+[处理下拉电阻影响（可选）]
+          ↓
+[调用 adc_battemp() 查表得到温度]
+          ↓
+[返回电池温度值]
+
+int dwVolt：从 ADC 读取到的电压值（通常来自电池温度检测电路）。
+int volt_cali：电压校准值，用于补偿系统误差。
+*/
 int volttotemp(struct mtk_battery *gm, int dwVolt, int volt_cali)
 {
+	/*
+	tres_temp, tres：中间变量，用于存储计算出的电阻值。
+	sbattmp：最终返回的电池温度值，初始设为 -100 表示未初始化。
+	vbif28：BIF（Battery Interface）引脚的上拉电压，默认使用预设值。
+	delta_v：电压差值，用于计算电阻。
+	vbif28_raw：BIF 引脚原始电压值。
+	ret：用于保存函数调用结果。
+	*/
 	long long tres_temp;
 	long long tres;
 	int sbattmp = -100;
@@ -854,31 +978,38 @@ int volttotemp(struct mtk_battery *gm, int dwVolt, int volt_cali)
 
 	tres_temp = (gm->rbat.rbat_pull_up_r * (long long) dwVolt);
 	ret = gauge_get_property(GAUGE_PROP_BIF_VOLTAGE,
-		&vbif28_raw);
+		&vbif28_raw);	//获取 BIF 引脚电压（用于动态校准）
 
-	if (ret != -ENOTSUPP) {
-		vbif28 = vbif28_raw + volt_cali;
-		delta_v = abs(vbif28 - dwVolt);
+	if (ret != -ENOTSUPP) {	//情况一：支持 BIF（即 ret != -ENOTSUPP）
+		vbif28 = vbif28_raw + volt_cali;	// 加入校准值
+		delta_v = abs(vbif28 - dwVolt);	// 计算电压差
 		if (delta_v == 0)
-			delta_v = 1;
-		tres_temp = div_s64(tres_temp, delta_v);
+			delta_v = 1;	// 避免除零错误
+		tres_temp = div_s64(tres_temp, delta_v);	// 完成分压公式
 		if (vbif28 > 3000 || vbif28 < 1700)
 			bm_debug("[RBAT_PULL_UP_VOLT_BY_BIF] vbif28:%d\n",
 				vbif28_raw);
-	} else {
+	} else {	//情况二：不支持 BIF,  使用默认的上拉电压值来计算电阻。
 		delta_v = abs(gm->rbat.rbat_pull_up_volt - dwVolt);
 		if (delta_v == 0)
 			delta_v = 1;
 		tres_temp = div_s64(tres_temp, delta_v);
 	}
 
+	/*
+	如果启用了下拉电阻配置（RBAT_PULL_DOWN_R），则进一步修正电阻值。
+	否则直接使用之前的 tres_temp。
+	*/
 #if IS_ENABLED(RBAT_PULL_DOWN_R)
 	tres = (tres_temp * RBAT_PULL_DOWN_R);
 	tres_temp = div_s64(tres, abs(RBAT_PULL_DOWN_R - tres_temp));
-
 #else
 	tres = tres_temp;
 #endif
+/*
+将最终计算出的电阻值传给 adc_battemp() 函数。
+该函数根据预定义的温度-电阻对照表，使用线性插值法计算出电池温度。
+*/
 	sbattmp = adc_battemp(gm, (int)tres);
 
 	bm_debug("[%s] %d %d %d %d\n",
@@ -1051,6 +1182,32 @@ int force_get_tbat_internal(struct mtk_battery *gm, bool update)
 	return bat_temperature_val;
 }
 
+/*
+force_get_tbat() 是一个用于安全地获取电池温度的函数，优先使用固定值（调试用），其次是默认值（未初始化时），最后尝试从硬件获取真实值。
+
+[函数调用]
+         ↓
+[判断 is_probe_done 是否为 false？]
+         ↓ yes
+[返回默认温度 25℃ 并缓存]
+
+         ↓ no
+[判断 fixed_bat_tmp 是否不等于 0xffff？]
+         ↓ yes
+[返回 fixed_bat_tmp 值并缓存]
+
+         ↓ no
+[调用 force_get_tbat_internal() 获取真实温度]
+         ↓
+[是否返回错误（如 -EHOSTDOWN）？]
+         ↓ yes
+[返回缓存的 cur_bat_temp]
+
+         ↓ no
+[更新 cur_bat_temp]
+         ↓
+[返回真实温度值]
+*/
 int force_get_tbat(struct mtk_battery *gm, bool update)
 {
 	int bat_temperature_val = 0;
@@ -1060,17 +1217,28 @@ int force_get_tbat(struct mtk_battery *gm, bool update)
 		return 25;
 	}
 
+	/*
+	判断是否启用了“固定温度”模式（调试/测试用）
+
+	fixed_bat_tmp 是一个调试用的字段，通常用于 MMI 测试或特殊场景下手动设定电池温度。
+	0xffff 是一个特殊标志，表示“未设置固定温度”。
+	如果设置了固定温度（如 30），就直接返回这个值，并更新当前温度。
+	*/
 	if (gm->fixed_bat_tmp != 0xffff) {
 		gm->cur_bat_temp = gm->fixed_bat_tmp;
 		return gm->fixed_bat_tmp;
 	}
 
-	bat_temperature_val = force_get_tbat_internal(gm, true);
+	bat_temperature_val = force_get_tbat_internal(gm, true);	//调用内部函数获取真实温度值
 
+	/*
+	如果获取温度失败（比如硬件暂时不可用），就返回上一次有效的温度值（缓存值）。
+	-EHOSTDOWN 是 Linux 内核中的一个标准错误码，表示“主机已关闭”或“设备不可达”。
+	*/
 	if (bat_temperature_val == -EHOSTDOWN)
 		return gm->cur_bat_temp;
 
-	gm->cur_bat_temp = bat_temperature_val;
+	gm->cur_bat_temp = bat_temperature_val;	//将获取到的真实温度值保存到 cur_bat_temp 中，供后续使用。
 
 	return bat_temperature_val;
 }
@@ -1078,11 +1246,29 @@ int force_get_tbat(struct mtk_battery *gm, bool update)
 /* ============================================================ */
 /* gaugel hal interface */
 /* ============================================================ */
+/*
+.get是如何调用的，对照mtk_gauge.h看
+用户空间 cat 命令
+     ↓
+sysfs_read_file()
+     ↓
+device_attribute show 方法：gauge_sysfs_show()
+     ↓
+调用 attr->get()：即 info_get()
+     ↓
+调用 gauge->desc->get_property()
+     ↓
+最终调用底层函数（如 battery_get_property）
+     ↓
+读取 ADC/I2C 获取真实数据
+     ↓
+返回给用户空间显示
+*/
 int gauge_get_property(enum gauge_property gp, int *val)
 {
 	struct mtk_gauge *gauge;
 	struct power_supply *psy;
-	struct mtk_gauge_sysfs_field_info *attr;
+	struct mtk_gauge_sysfs_field_info *attr;	//一个数组，每个元素对应一个 Gauge 属性（比如电压、电流），包含对应的读取函数。
 	static struct mtk_battery *gm;
 	int ret = 0;
 
@@ -1104,6 +1290,13 @@ int gauge_get_property(enum gauge_property gp, int *val)
 		bm_err("%s attr =NULL\n", __func__);
 		return -ENODEV;
 	}
+	//检查属性索引是否匹配并调用读取函数
+	/*
+	检查当前索引 gp 是否与属性表中的 .prop 字段匹配，确保不会访问错位的数据。
+	加锁是为了保证多线程安全（防止并发访问硬件）。
+	调用 .get() 回调函数读取实际值（比如从 ADC 或 Fuel Gauge IC 读取）。
+	解锁后返回结果。
+	*/
 	if (attr[gp].prop == gp) {
 		mutex_lock(&gauge->ops_lock);
 		ret = attr[gp].get(gauge, &attr[gp], val);
