@@ -1736,17 +1736,24 @@ void fg_custom_init_from_header(struct mtk_battery *gm)
 }
 
 #if IS_ENABLED(CONFIG_OF)
-//从设备树节点中读取一个无符号 32 位整数，并乘以一个单位系数，然后保存到指定的参数指针中。
+/*
+fg_read_dts_val() 是一个从设备树中读取配置值的通用函数，它会将原始值乘以一个单位换算因子，再写入输出参数中。
+
+const struct device_node *np：指向当前设备树节点。
+const char *node_string：要查找的设备树属性名称（字符串）。
+int *param：输出参数，用于保存解析并换算后的结果。
+int unit：单位换算因子（例如：60 表示“分钟转秒”）。
+*/
 static int fg_read_dts_val(const struct device_node *np,
 		const char *node_srting,
 		int *param, int unit)
 {
-	static unsigned int val;
+	static unsigned int val;//用于临时保存从设备树中读取的原始值, 类型为 unsigned int，因为设备树中的整数通常是 32 位无符号整型。
 
+	//从设备树节点中读取一个无符号 32 位整数，并乘以一个单位系数，然后保存到指定的参数指针中。
 	if (!of_property_read_u32(np, node_srting, &val)) {
 		*param = (int)val * unit;
-		bm_debug("Get %s: %d\n",
-			 node_srting, *param);
+		bm_debug("Get %s: %d\n", node_srting, *param);
 	} else {
 		bm_debug("Get %s no data\n", node_srting);
 		return -1;
@@ -1771,6 +1778,33 @@ static int fg_read_dts_val_by_idx(const struct device_node *np,
 	return 0;
 }
 
+/*
+[开始]
+          ↓
+[初始化变量]
+          ↓
+[从设备树中读取数据]
+          ↓
+[解析 mah / voltage / resistance]
+          ↓
+[处理 charge_rdc[] 值]
+          ↓
+[写入 profile_struct 数组]
+          ↓
+[是否已读取足够的 saddles 个点？]
+          ↓ yes
+[结束]
+
+          ↓ no
+[是否没有读取到任何数据？]
+          ↓ yes
+[输出错误日志并返回]
+
+          ↓ no
+[用最后一条数据补全 profile 数组]
+          ↓
+[结束]
+*/
 static void fg_custom_parse_table(struct mtk_battery *gm,
 		const struct device_node *np,
 		const char *node_srting,
@@ -1800,6 +1834,11 @@ static void fg_custom_parse_table(struct mtk_battery *gm,
 		}
 		idx++;
 
+		/*
+		如果 column == 3：只提供了 mah/voltage/resistance，RDC 默认都等于 resistance。
+		如果 column >= 4：第 4 个字段是 charge_rdc[0]
+		如果 column > 4：继续读取更多 RDC 字段（最多 MAX_CHARGE_RDC 个）
+		*/
 		if (column == 3) {
 			for (i = 0; i < MAX_CHARGE_RDC; i++)
 				charge_rdc[i] = resistance;
