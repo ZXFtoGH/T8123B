@@ -2570,6 +2570,21 @@ bool fg_interrupt_check(struct mtk_battery *gm)
 	return true;
 }
 
+/*
+[Coulomb 高阈值中断触发]
+          ↓
+[调用 fg_coulomb_int_h_handler()]
+          ↓
+[获取当前 Coulomb 值]
+          ↓
+[设置新的 Coulomb 高/低阈值]
+          ↓
+[重新启动 Coulomb 正负中断]
+          ↓
+[唤醒 Fuel Gauge 算法]
+          ↓
+[更新电量估算]
+*/
 int fg_coulomb_int_h_handler(struct mtk_battery *gm,
 	struct gauge_consumer *consumer)
 {
@@ -2754,12 +2769,32 @@ static int en_uisoc_lt_int_set(struct mtk_battery *gm,
 	return 0;
 }
 
+/*
+uisoc_set() 是一个用于接收用户空间设置的电量百分比（UI SOC）的函数，它会根据配置更新内核中的显示电量，并通知上层系统电量变化。
+[uisoc_set(val)]
+          ↓
+[检查 val 合法性]
+          ↓
+[保存到 pdata->ui_old_soc]
+          ↓
+[根据 disableGM30 设置 gm->ui_soc]
+          ↓
+[比较新旧 ui_soc 值]
+          ↓ yes
+[记录时间戳、计算差值]
+          ↓
+[更新 bat_capacity]
+          ↓
+[调用 battery_update()]
+          ↓
+[结束]
+*/
 static int uisoc_set(struct mtk_battery *gm,
 	struct mtk_battery_sysfs_field_info *attr,
 	int val)
 {
-	int daemon_ui_soc;
-	int old_uisoc;
+	int daemon_ui_soc;	//来自用户空间的 UI SOC 值。
+	int old_uisoc;	//保存旧的 UI SOC 值，用于比较
 	ktime_t now_time, diff;
 	struct timespec64 tmp_time;
 	struct mtk_battery_algo *algo;
@@ -2778,15 +2813,24 @@ static int uisoc_set(struct mtk_battery *gm,
 		daemon_ui_soc = 0;
 	}
 
-	pdata->ui_old_soc = daemon_ui_soc;
-	old_uisoc = gm->ui_soc;
+	pdata->ui_old_soc = daemon_ui_soc;	//保存到自定义数据结构中，供其他模块使用
+	old_uisoc = gm->ui_soc;	//保存当前的 UI SOC 值，用于判断是否变化
 
 	if (gm->disableGM30 == true)
 		gm->ui_soc = 50;
 	else
 		gm->ui_soc = (daemon_ui_soc + 50) / 100;
 
-	/* when UISOC changes, check the diff time for smooth */
+	/* when UISOC changes, check the diff time for smooth 判断 UI SOC 是否变化，并记录时间戳 
+	if
+	如果 UI SOC 发生变化，记录当前时间戳。
+	计算与上次设置的时间差（单位：秒）。
+	打印调试日志，便于分析 UI 更新频率。
+	更新 uisoc_oldtime 为当前时间
+
+	else
+	即使 UI SOC 没有变化，也更新 bat_capacity 和 battery_update()，确保数据一致性。
+	*/
 	if (old_uisoc != gm->ui_soc) {
 		now_time = ktime_get_boottime();
 		diff = ktime_sub(now_time, gm->uisoc_oldtime);
@@ -2799,8 +2843,8 @@ static int uisoc_set(struct mtk_battery *gm,
 			gm->disableGM30, old_uisoc, tmp_time.tv_sec);
 		gm->uisoc_oldtime = now_time;
 
-		gm->bs_data.bat_capacity = gm->ui_soc;
-		battery_update(gm);
+		gm->bs_data.bat_capacity = gm->ui_soc;	//更新 bat_capacity 字段，这个字段通常用于 sysfs 或用户空间展示。
+		battery_update(gm);	//调用 battery_update(gm)：通知系统电量变化，可能触发 UI 更新、充电状态变化等。
 	} else {
 		bm_debug("[%s] FG_DAEMON_CMD_SET_KERNEL_UISOC = %d %d GM3:%d\n",
 			__func__,
@@ -2851,6 +2895,9 @@ static int init_done_set(struct mtk_battery *gm,
 	return 0;
 }
 
+/*
+重置电池电量计数器（Coulomb Counter），用于开始新的充放电周期统计，并记录相关数据用于电池健康度（Battery Cycle）计算。
+*/
 static int reset_set(struct mtk_battery *gm,
 	struct mtk_battery_sysfs_field_info *attr,
 	int val)
@@ -2899,6 +2946,9 @@ static int temp_th_set(struct mtk_battery *gm,
 	return 0;
 }
 
+/*
+将用户空间通过 sysfs 写入的数据传递给对应的处理函数（例如 uisoc_set() 或 reset_set()），从而控制电池管理系统的行为。
+*/
 static ssize_t bat_sysfs_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
@@ -2918,7 +2968,7 @@ static ssize_t bat_sysfs_store(struct device *dev,
 	battery_attr = container_of(attr,
 		struct mtk_battery_sysfs_field_info, attr);
 	if (battery_attr->set != NULL)
-		battery_attr->set(gm, battery_attr, val);
+		battery_attr->set(gm, battery_attr, val);	// 调用具体的 set 处理函数
 
 	return count;
 }
@@ -2944,6 +2994,12 @@ static ssize_t bat_sysfs_show(struct device *dev,
 	return count;
 }
 
+/*
+定义了一个名为 battery_sysfs_field_tbl[] 的数组，它用于在 Linux 内核中 创建与电池相关的 sysfs 接口（文件节点）。
+每个接口对应一个特定的电池属性，并指定该接口是只写（WO）、读写（RW）等权限。
+
+
+*/
 /* Must be in the same order as BAT_PROP_* */
 static struct mtk_battery_sysfs_field_info battery_sysfs_field_tbl[] = {
 	BAT_SYSFS_FIELD_RW(temperature, BAT_PROP_TEMPERATURE),
@@ -2960,6 +3016,27 @@ static struct mtk_battery_sysfs_field_info battery_sysfs_field_tbl[] = {
 	BAT_SYSFS_FIELD_WO(temp_th, BAT_PROP_TEMP_TH_GAP),
 };
 
+/*
+根据指定的电池属性（enum battery_property），从内核中获取对应的电池状态值（如电量、电压、温度等）并返回给调用者。
+[battery_get_property(bp, val)]
+          ↓
+[通过 "battery" 名称获取 power_supply 对象]
+          ↓
+[获取 mtk_battery 上下文 gm]
+          ↓
+[查找 battery_sysfs_field_tbl[bp]]
+          ↓
+[检查 prop 是否匹配]
+          ↓ yes
+[调用 battery_sysfs_field_tbl[bp].get()]
+          ↓
+[将结果写入 val]
+          ↓
+[返回 0（成功）]
+
+          ↓ no
+[返回 -ENOTSUPP（属性不支持）]
+*/
 int battery_get_property(enum battery_property bp,
 			    int *val)
 {
@@ -2973,7 +3050,7 @@ int battery_get_property(enum battery_property bp,
 	gm = (struct mtk_battery *)power_supply_get_drvdata(psy);
 	if (battery_sysfs_field_tbl[bp].prop == bp)
 		battery_sysfs_field_tbl[bp].get(gm,
-			&battery_sysfs_field_tbl[bp], val);
+			&battery_sysfs_field_tbl[bp], val);	//调用对应属性的 get() 函数获取值
 	else {
 		bm_err("%s bp:%d idx error\n", __func__, bp);
 		return -ENOTSUPP;
@@ -3013,12 +3090,19 @@ int battery_set_property(enum battery_property bp,
 }
 
 static struct attribute *
-	battery_sysfs_attrs[ARRAY_SIZE(battery_sysfs_field_tbl) + 1];
+	battery_sysfs_attrs[ARRAY_SIZE(battery_sysfs_field_tbl) + 1];	//长度为 battery_sysfs_field_tbl 表的长度 +1，因为最后要以 NULL 结尾。这个数组最终会作为 attribute_group 的一部分传给 sysfs 子系统。
 
 static const struct attribute_group battery_sysfs_attr_group = {
 	.attrs = battery_sysfs_attrs,
 };
 
+/*
+这个函数将 battery_sysfs_field_tbl 中的每个条目转换成 struct attribute * 类型，并存入 battery_sysfs_attrs 数组中。
+最后一个元素设置为 NULL，表示属性数组结束（符合内核要求）。
+battery_sysfs_field_tbl[i].attr.attr：
+外层 attr 是 mtk_battery_sysfs_field_info 中定义的 device_attribute 成员；
+内层 .attr 是 device_attribute 中嵌套的 attribute 成员。
+*/
 static void battery_sysfs_init_attrs(void)
 {
 	int i, limit = ARRAY_SIZE(battery_sysfs_field_tbl);
@@ -3029,6 +3113,26 @@ static void battery_sysfs_init_attrs(void)
 	battery_sysfs_attrs[limit] = NULL; /* Has additional entry for this */
 }
 
+/*
+调用 battery_sysfs_init_attrs() 初始化属性数组。
+然后使用 sysfs_create_group() 将这组属性添加到 power_supply 设备的 kobject 下。
+成功时返回 0，失败则返回错误码。
+psy->dev.kobj 是设备的核心对象，sysfs 文件系统基于它来创建节点。
+
+[battery_sysfs_create_group(psy)]
+          ↓
+[调用 battery_sysfs_init_attrs()]
+          ↓
+[遍历 battery_sysfs_field_tbl]
+          ↓
+[填充 battery_sysfs_attrs[]]
+          ↓
+[最后一个元素设为 NULL]
+          ↓
+[调用 sysfs_create_group()]
+          ↓
+[在 /sys/class/power_supply/battery/ 下创建对应的属性文件]
+*/
 static int battery_sysfs_create_group(struct power_supply *psy)
 {
 	battery_sysfs_init_attrs();
@@ -3040,6 +3144,29 @@ static int battery_sysfs_create_group(struct power_supply *psy)
 /* ============================================================ */
 /* nafg monitor */
 /* ============================================================ */
+/*
+fg_nafg_monitor() 是一个 Fuel Gauge 子系统中的监控函数，用于检测 Coulomb Counter 是否长时间无变化（NAFG），
+如果超过阈值（默认 600 秒），则判定为硬件故障并主动禁用 NAFG 功能。
+
+[fg_nafg_monitor(gm)]
+          ↓
+[判断是否跳过监控]
+ (disableGM30 / cmd_disable_nafg / ntc_disable_nafg)
+          ↓ yes
+[直接返回]
+
+          ↓ no
+[获取当前 NAFG 计数器值]
+          ↓
+[若计数器变化 → 更新最后更新时间]
+          ↓
+[否则计算距离上次更新的时间差]
+          ↓
+[如果超过 600s（10分钟）]
+          ↓ yes
+[设置 is_nafg_broken = true]
+[触发 disable NAFG 命令]
+*/
 void fg_nafg_monitor(struct mtk_battery *gm)
 {
 	int nafg_cnt = 0;
@@ -3056,7 +3183,7 @@ void fg_nafg_monitor(struct mtk_battery *gm)
 
 	nafg_cnt = gauge_get_int_property(GAUGE_PROP_NAFG_CNT);
 
-	if (gm->last_nafg_cnt != nafg_cnt) {
+	if (gm->last_nafg_cnt != nafg_cnt) {	//如果 NAFG 计数变了 → 说明 Coulomb Counter 有变化，更新记录时间和值。
 		gm->last_nafg_cnt = nafg_cnt;
 		gm->last_nafg_update_time = ktime_get_boottime();
 	} else {
