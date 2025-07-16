@@ -99,6 +99,15 @@ void __attribute__ ((weak))
 {
 }
 
+/*
+这是一个 “占位函数”，允许在 其他地方重写，如果没有重写，就使用这个空实现。
+
+__attribute__((weak)) 是什么？
+这是 GCC 编译器的一个特性，用于 将函数或变量标记为“弱符号”。
+
+普通函数（强符号）：如果有两个同名的函数，链接器会报错（多重定义）。
+弱符号函数：可以被其他同名的强符号函数覆盖，如果没有覆盖，就使用这个弱符号定义。
+*/
 void __attribute__ ((weak))
 	fg_drv_update_daemon(struct mtk_battery *gm)
 {
@@ -3216,6 +3225,22 @@ void fg_nafg_monitor(struct mtk_battery *gm)
 /* ============================================================ */
 /* periodic timer */
 /* ============================================================ */
+/*
+fg_drv_update_hw_status() 是一个周期性运行的函数，负责读取电池硬件状态、打印调试信息、更新算法和 UI，并通过 hrtimer 定期唤醒自己继续工作。
+[fg_drv_update_hw_status(gm)]
+          ↓
+[获取当前电池温度]
+          ↓
+[打印 debug 日志（包含电量、温度、SOC、UI SOC 等）]
+          ↓
+[调用 fg_drv_update_daemon() → 更新 daemon 数据]
+          ↓
+[如果算法已激活 → 调用 battery_update()]
+          ↓
+[设置下一次定时唤醒时间（10s）]
+          ↓
+[重启 hrtimer]
+*/
 static void fg_drv_update_hw_status(struct mtk_battery *gm)
 {
 	ktime_t ktime;
@@ -3238,7 +3263,7 @@ static void fg_drv_update_hw_status(struct mtk_battery *gm)
 	fg_drv_update_daemon(gm);
 
 	/* kernel mode need regular update info */
-	if (gm->algo.active == true)
+	if (gm->algo.active == true)	//如果算法层已经激活（即进入正常工作状态），则调用 battery_update() 来更新 UI 上显示的电量、状态等信息。
 		battery_update(gm);
 
 	if (bat_get_debug_level() >= BMLOG_DEBUG_LEVEL)
@@ -3302,6 +3327,48 @@ in_sleep:
 }
 
 #ifdef CONFIG_PM
+/*
+这个函数用于监听系统的休眠、唤醒等电源状态变化事件，并在这些事件发生时对电池管理系统进行相应的处理，比如暂停/恢复电量更新、防止并发访问等。
+
+作用：这是一个电源管理事件的回调函数。
+注册方式：通常通过 register_pm_notifier() 注册到 Linux 内核的 PM 子系统中。
+触发时机：当系统进入或退出休眠、挂起、Hibernate 等状态时被调用
+
+[system_pm_notify()]
+          ↓
+[获取 mtk_battery 结构体 gm]
+          ↓
+[根据 mode 判断电源事件类型]
+          ↓
+[如果是准备休眠（SUSPEND_PREPARE）等事件]
+    ↓
+[检查是否有电池状态正在更新（bat_psy->changed）]
+    ↓ yes
+[返回 NOTIFY_BAD → 阻止进入休眠]
+
+    ↓ no
+[尝试加锁 fg_update_lock，设置 in_sleep = true]
+    ↓ fail
+[返回 NOTIFY_BAD]
+
+    ↓ success
+[解锁并继续]
+          ↓
+[如果是从休眠恢复（POST_SUSPEND）]
+    ↓
+[加锁，设置 in_sleep = false，唤醒等待队列]
+
+返回值			含义
+NOTIFY_DONE	正常处理完成
+NOTIFY_BAD	出现错误，阻止系统进入休眠
+NOTIFY_STOP	强制停止所有通知链
+
+✅ 应用场景举例
+场景							描述
+系统休眠前保护 FG 数据		避免 Coulomb Counter 在休眠中更新导致数据不一致
+用户空间更新电量			防止休眠期间用户空间读取到不稳定的数据
+休眠唤醒后恢复算法运行		唤醒等待队列，让 FG 继续正常工作
+*/
 static int system_pm_notify(struct notifier_block *nb,
 			    unsigned long mode, void *_unused)
 {
@@ -3311,19 +3378,19 @@ static int system_pm_notify(struct notifier_block *nb,
 	struct power_supply *bat_psy = bat_data->psy;
 
 	switch (mode) {
-	case PM_HIBERNATION_PREPARE:
+	case PM_HIBERNATION_PREPARE:	//处理准备进入休眠/挂起等事件
 	case PM_RESTORE_PREPARE:
 	case PM_SUSPEND_PREPARE:
 		if (!gm->disable_bs_psy) {
-			if (bat_psy->changed)
+			if (bat_psy->changed)	//如果 bat_psy->changed == true 表示当前有电池状态正在更新（比如电量变化），此时不能进入休眠，返回 NOTIFY_BAD 来阻止系统进入低功耗状态。
 				return NOTIFY_BAD;
 		}
-		if (!mutex_trylock(&gm->fg_update_lock))
+		if (!mutex_trylock(&gm->fg_update_lock))	//如果无法获取锁（可能有其他线程正在更新 FG 数据），也返回 NOTIFY_BAD 阻止休眠。
 			return NOTIFY_BAD;
-		gm->in_sleep = true;
-		mutex_unlock(&gm->fg_update_lock);
+		gm->in_sleep = true;	//成功加锁后，标记 in_sleep = true，表示进入休眠状态。
+		mutex_unlock(&gm->fg_update_lock);	//解锁以便其他线程可以退出。
 		break;
-	case PM_POST_HIBERNATION:
+	case PM_POST_HIBERNATION:	//处理从休眠/挂起恢复事件
 	case PM_POST_RESTORE:
 	case PM_POST_SUSPEND:
 		mutex_lock(&gm->fg_update_lock);
@@ -3339,6 +3406,14 @@ static int system_pm_notify(struct notifier_block *nb,
 }
 #endif /* CONFIG_PM */
 
+/*
+作用：通知 FG 线程有新的更新请求。
+原理：
+	设置标志位 fg_update_flag = 1
+	调用 wake_up(&gm->wait_que) 唤醒等待队列中可能阻塞的任务
+使用场景：
+	在定时器、中断、电源管理恢复等事件中调用，触发 FG 更新流程
+*/
 void fg_update_routine_wakeup(struct mtk_battery *gm)
 {
 	bm_debug("%s\n", __func__);
@@ -3346,6 +3421,14 @@ void fg_update_routine_wakeup(struct mtk_battery *gm)
 	wake_up(&gm->wait_que);
 }
 
+/*
+作用：当 hrtimer 触发时被调用。
+逻辑：
+从 hrtimer 获取 mtk_battery 实例
+调用 fg_update_routine_wakeup() 触发 FG 更新
+返回值：
+HRTIMER_NORESTART：表示该定时器只执行一次（不自动重启）
+*/
 enum hrtimer_restart fg_drv_thread_hrtimer_func(struct hrtimer *timer)
 {
 	struct mtk_battery *gm;
@@ -3357,6 +3440,35 @@ enum hrtimer_restart fg_drv_thread_hrtimer_func(struct hrtimer *timer)
 	return HRTIMER_NORESTART;
 }
 
+/*
+作用：初始化一个单次定时器，10 秒后触发回调函数。
+参数说明：
+	CLOCK_MONOTONIC：使用单调递增的时间源（不受系统时间修改影响）
+	HRTIMER_MODE_REL：相对时间模式（相对于当前时间）
+典型用途：
+	在休眠唤醒后重新启动 FG 更新流程
+	防止因长时间无更新导致 SOC 不准确
+
+
+[fg_drv_thread_hrtimer_init()]
+          ↓
+[设置定时器为 10s 后触发]
+          ↓
+[注册回调函数 fg_drv_thread_hrtimer_func]
+
+        [定时器触发]
+              ↓
+[调用 fg_drv_thread_hrtimer_func()]
+              ↓
+[获取 gm 实例]
+              ↓
+[调用 fg_update_routine_wakeup(gm)]
+              ↓
+[设置 flag: fg_update_flag = 1]
+[唤醒 wait_que 上等待的任务]
+
+→ FG 主线程检测到 flag 变化 → 执行 update 操作 → 清除 flag
+*/
 void fg_drv_thread_hrtimer_init(struct mtk_battery *gm)
 {
 	ktime_t ktime;
@@ -3410,6 +3522,9 @@ static enum alarmtimer_restart tracking_timer_callback(
 	return ALARMTIMER_NORESTART;
 }
 
+/*
+这个函数作为 1% 电量更新定时器触发后的工作任务 被执行，其作用是唤醒 Fuel Gauge 算法层，触发一次电量相关的计算或状态更新（如 UI SOC 更新）。
+*/
 static void one_percent_timer_work_handler(struct work_struct *data)
 {
 	struct mtk_battery *gm;
@@ -3420,6 +3535,11 @@ static void one_percent_timer_work_handler(struct work_struct *data)
 	wakeup_fg_algo_cmd(gm, FG_INTR_FG_TIME, 0, 1);
 }
 
+/*
+用途：作为 alarmtimer 定时器的回调函数，在定时器到期时执行。
+触发时机：当设定的时间到达后，由内核自动调用。
+运行上下文：在中断上下文中执行，因此不能做耗时操作，通常通过 schedule_work() 转交给工作队列处理。
+*/
 static enum alarmtimer_restart one_percent_timer_callback(
 	struct alarm *alarm, ktime_t now)
 {
@@ -3432,6 +3552,36 @@ static enum alarmtimer_restart one_percent_timer_callback(
 	return ALARMTIMER_NORESTART;
 }
 
+/*
+这个函数作为 软件 UI SOC 更新定时器触发后的工作任务 被执行，它的作用是：
+
+检查当前电量（SOC）与显示电量（UI SOC）是否一致；
+如果不一致，就唤醒 Fuel Gauge 算法层进行一次更新操作；
+从而防止 UI 显示电量卡住或与实际电量不符。
+
+[sw_uisoc_timer_work_handler(data)]
+          ↓
+[通过 work_struct 获取 gm]
+          ↓
+[打印 debug 日志（soc/ui_soc）]
+          ↓
+[SOC > UI_SOC? → 发送 FG_INTR_BAT_INT2_HT]
+          ↓
+[SOC < UI_SOC? → 发送 FG_INTR_BAT_INT2_LT]
+          ↓
+[否则不做任何事]
+
+📦 可能的应用场景
+场景	描述
+防止电量卡住	Coulomb 计数器长时间无变化时，仍确保 UI SOC 不会卡住
+UI SOC 同步更新	即使 Coulomb 没有变化，也要定期检查并同步 UI SOC
+系统休眠唤醒后更新	在系统从休眠恢复后，检查电量状态并刷新 UI
+用户空间请求更新	用户空间可能通过 sysfs 或 ioctl 请求更新电量显示
+
+📌 补充说明
+这个函数通常是配合一个 定时器（如 hrtimer 或 alarmtimer）一起使用。
+定时器负责定期触发，而本函数作为实际执行的任务，在工作队列中运行，避免在中断上下文中做复杂操作。
+*/
 static void sw_uisoc_timer_work_handler(struct work_struct *data)
 {
 	struct mtk_battery *gm;
@@ -3594,6 +3744,7 @@ int set_shutdown_cond(struct mtk_battery *gm, int shutdown_cond)
 		now_is_kpoc, now_current, now_is_charging,
 		sdc->shutdown_cond_flag, vbat);
 
+	//如果已有其他关机条件被激活，则返回不处理：
 	if (sdc->shutdown_cond_flag == 1)
 		return 0;
 
@@ -3604,14 +3755,21 @@ int set_shutdown_cond(struct mtk_battery *gm, int shutdown_cond)
 		return 0;
 
 	switch (shutdown_cond) {
-	case OVERHEAT:
+	case OVERHEAT:	//温度过高关机
 		mutex_lock(&sdc->lock);
 		sdc->shutdown_status.is_overheat = true;
 		mutex_unlock(&sdc->lock);
 		bm_debug("[%s]OVERHEAT shutdown!\n", __func__);
 		kernel_power_off();
 		break;
-	case SOC_ZERO_PERCENT:
+	/*
+	//电量为0%关机
+	如果不是 KPOC 或正在充电，才允许触发；
+	设置关机标志；
+	记录时间戳；
+	触发 FG 算法层进行最终电量确认。
+	*/
+	case SOC_ZERO_PERCENT:	
 		if (sdc->shutdown_status.is_soc_zero_percent != true) {
 			mutex_lock(&sdc->lock);
 			if (now_is_kpoc != 1) {
@@ -3629,7 +3787,7 @@ int set_shutdown_cond(struct mtk_battery *gm, int shutdown_cond)
 			mutex_unlock(&sdc->lock);
 		}
 		break;
-	case UISOC_ONE_PERCENT:
+	case UISOC_ONE_PERCENT:	//UI 显示电量为1%关机
 		if (sdc->shutdown_status.is_uisoc_one_percent != true) {
 			mutex_lock(&sdc->lock);
 			if (now_is_kpoc != 1) {
@@ -3649,7 +3807,7 @@ int set_shutdown_cond(struct mtk_battery *gm, int shutdown_cond)
 		}
 		break;
 #ifdef SHUTDOWN_CONDITION_LOW_BAT_VOLT
-	case LOW_BAT_VOLT:
+	case LOW_BAT_VOLT:	//低电压关机（受宏控制）
 		if (sdc->shutdown_status.is_under_shutdown_voltage != true) {
 			int i;
 
@@ -3667,7 +3825,7 @@ int set_shutdown_cond(struct mtk_battery *gm, int shutdown_cond)
 		}
 		break;
 #endif
-	case DLPT_SHUTDOWN:
+	case DLPT_SHUTDOWN:	//动态负载电源跟踪关机（防过流/过载）
 		if (sdc->shutdown_status.is_dlpt_shutdown != true) {
 			mutex_lock(&sdc->lock);
 			sdc->shutdown_status.is_dlpt_shutdown = true;
@@ -4246,4 +4404,3 @@ int battery_init(struct platform_device *pdev)
 
 	return 0;
 }
-
