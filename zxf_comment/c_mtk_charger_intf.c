@@ -330,42 +330,50 @@ bool is_charger_exist(struct mtk_charger *info)
 	return ret;
 }
 
+/*
+功能：返回当前检测到的充电器类型（如标准充电器、USB 充电器、无线充电等）。
+参数：info 是一个指向 mtk_charger 结构体的指针，保存了充电器相关的信息和状态。
+返回值：一个整数，表示充电器类型（例如 POWER_SUPPLY_TYPE_USB, POWER_SUPPLY_TYPE_UNKNOWN 等）。
+*/
 int get_charger_type(struct mtk_charger *info)
 {
-	union power_supply_propval prop = {0};
-	union power_supply_propval prop2 = {0};
-	union power_supply_propval prop3 = {0};
-	static struct power_supply *chg_psy;
+	union power_supply_propval prop = {0};	// 存储 ONLINE 状态（是否连接）
+	union power_supply_propval prop2 = {0};	// 存储充电器类型（TYPE）
+	union power_supply_propval prop3 = {0};	// 存储 USB 类型（USB_TYPE）
+	static struct power_supply *chg_psy;	// 电源供应设备对象
 	int ret;
 
-	chg_psy = info->chg_psy;
+	chg_psy = info->chg_psy;	// 从结构体 info 中获取缓存的充电设备句柄
 
+	// 如果句柄无效（NULL 或错误指针），尝试重新获取
 	if (chg_psy == NULL || IS_ERR(chg_psy)) {
 		chr_err("%s retry to get chg_psy\n", __func__);
 #if IS_ENABLED(CONFIG_CHARGER_SECOND_MAINCHG)		
-	chg_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "charger_second");
+	chg_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "charger_second");	// 如果支持第二充电器，优先获取第二充电器句柄
 #else		
-		chg_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "charger");
+		chg_psy = devm_power_supply_get_by_phandle(&info->pdev->dev, "charger");	// 否则获取默认充电器句柄
 #endif
-		info->chg_psy = chg_psy;
+		info->chg_psy = chg_psy;	// 更新缓存
 	}
 
 	if (chg_psy == NULL || IS_ERR(chg_psy)) {
 		chr_err("%s Couldn't get chg_psy\n", __func__);
 	} else {
+		//如果成功获取 chg_psy 句柄，则通过 power_supply_get_property 查询三个属性：
 		ret = power_supply_get_property(chg_psy,
-			POWER_SUPPLY_PROP_ONLINE, &prop);
+			POWER_SUPPLY_PROP_ONLINE, &prop);	// 是否在线（连接）
 
 		ret = power_supply_get_property(chg_psy,
-			POWER_SUPPLY_PROP_TYPE, &prop2);
+			POWER_SUPPLY_PROP_TYPE, &prop2);	// 充电器类型
 
 		ret = power_supply_get_property(chg_psy,
-			POWER_SUPPLY_PROP_USB_TYPE, &prop3);
+			POWER_SUPPLY_PROP_USB_TYPE, &prop3);	// USB 子类型
 
+		// 如果未连接（prop.intval == 0），或类型是 USB 但子类型未知
 		if (prop.intval == 0 ||
 		    (prop2.intval == POWER_SUPPLY_TYPE_USB &&
 		    prop3.intval == POWER_SUPPLY_USB_TYPE_UNKNOWN))
-			prop2.intval = POWER_SUPPLY_TYPE_UNKNOWN;
+			prop2.intval = POWER_SUPPLY_TYPE_UNKNOWN;	//强制标记为未知类型
 	}
 
 	chr_debug("%s online:%d type:%d usb_type:%d\n", __func__,

@@ -897,6 +897,7 @@ static int dvchg2_dev_event(struct notifier_block *nb, unsigned long event,
 }
 
 //将一组预定义的充电控制函数注册到 mtk_charger 结构体中，以便后续在充电流程中调用这些函数进行充电逻辑控制。
+//mtk_charger.c中调用这个函数
 int mtk_basic_charger_init(struct mtk_charger *info)
 {
 	info->algo.do_algorithm = do_algorithm;

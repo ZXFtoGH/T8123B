@@ -1050,7 +1050,7 @@ static void mtk_charger_start_timer(struct mtk_charger *info)
 	end_time.tv_sec = time_now.tv_sec + info->polling_interval;	// 当前秒数加上轮询间隔
 	end_time.tv_nsec = time_now.tv_nsec + 0;	// 纳秒部分保持不变
 	info->endtime = end_time;	// 记录下次唤醒时间
-	ktime = ktime_set(info->endtime.tv_sec, info->endtime.tv_nsec);	// 构造 ktime_t 类型的时间戳
+	ktime = ktime_set(info->endtime.tv_sec, info->endtime.tv_nsec);	// 构造 ktime_t 类型的时间戳,将人类易于理解的「秒+纳秒」时间表示法，转换为内核定时器子系统所需的、以纳秒为单位的单一数值表示法（ktime_t），为后续启动定时器做好准备
 
 	/*
 	启动计时器
@@ -3941,6 +3941,7 @@ static int charger_routine_thread(void *arg)
 		使用 wait_event_interruptible() 阻塞等待某个条件成立；
 		条件是 info->charger_thread_timeout == true；
 		如果被中断唤醒，则打印日志并继续循环；
+		如果它为 false，线程就睡在 info->wait_que 这个队列上。
 		*/
 		ret = wait_event_interruptible(info->wait_que, (info->charger_thread_timeout == true));
 		if (ret < 0) {
@@ -4000,6 +4001,19 @@ static int charger_routine_thread(void *arg)
 		if (vbat_min != 0)
 			vbat_min = vbat_min / 1000;
 
+/*
+这段代码每隔10秒打印一次充电状态信息（chr_err日志）是因为内核中有一个定时器机制在持续触发充电状态检查。以下是关键原因分析：
+
+1. 定时器初始化与触发
+定时器初始化：在mtk_charger_probe()中调用了mtk_charger_init_timer(info)，该函数初始化了一个alarm定时器（charger_timer），并立即启动（mtk_charger_start_timer(info)）。
+定时器回调：当定时器到期时，会触发mtk_charger_alarm_timer_func()函数，该函数通过_wake_up_charger(info)唤醒充电线程。
+2. 充电线程的轮询机制
+线程唤醒：_wake_up_charger(info)会设置charger_thread_timeout = true，并唤醒等待队列wait_que中的charger_routine_thread()线程。
+线程逻辑：在charger_routine_thread()中，线程被唤醒后会执行以下操作：
+重新启动定时器：调用mtk_charger_start_timer(info)，设置下一个10秒的定时器（polling_interval = CHARGING_INTERVAL = 10）。
+打印状态信息：在每次循环中，会调用chr_err()打印电池电压、VBUS电压、电流、温度等状态信息。
+检查充电状态：调用charger_check_status(info)更新充电状态。
+*/
 		chr_err("Vbat=%d vbats=%d vbus:%d ibus:%d I=%d T=%d uisoc:%d type:%s>%s pd:%d swchg_ibat:%d cv:%d\n",
 			get_battery_voltage(info),
 			vbat_min,
@@ -5343,6 +5357,22 @@ static struct platform_driver mtk_charger_driver = {
 		   .of_match_table = mtk_charger_of_match,
 	},
 };
+
+/*
+✅ 1. mtk_charger_init 是什么时候被调用的？
+mtk_charger_init 函数前面有一个 __init 宏，表示这是一个 内核初始化函数。
+📌 调用时机：内核启动时（Boot Time）
+当 Linux 内核启动时，会扫描所有用 __init 标记的初始化函数。
+这些函数会被链接到特殊的段（section）中，比如 .initcall.init。
+内核在启动过程中会 自动遍历并调用这些初始化函数。
+
+📦 注册驱动：platform_driver_register
+mtk_charger_init 做的事情是：
+platform_driver_register(&mtk_charger_driver);
+这会把 mtk_charger_driver 这个平台驱动结构体 注册到 Linux 内核的 platform bus（平台总线） 上。
+
+📌 此时只是“注册”，还没有调用 probe，相当于说：“我这个驱动准备好了，如果有匹配的设备，就交给我处理。”
+*/
 
 static int __init mtk_charger_init(void)
 {
