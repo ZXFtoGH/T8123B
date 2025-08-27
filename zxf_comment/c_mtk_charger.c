@@ -4013,6 +4013,8 @@ static int charger_routine_thread(void *arg)
 重新启动定时器：调用mtk_charger_start_timer(info)，设置下一个10秒的定时器（polling_interval = CHARGING_INTERVAL = 10）。
 打印状态信息：在每次循环中，会调用chr_err()打印电池电压、VBUS电压、电流、温度等状态信息。
 检查充电状态：调用charger_check_status(info)更新充电状态。
+
+定时器(10秒) -> 唤醒线程 -> charger_check_status() -> do_algorithm() -> select_charging_current_limit() -> 打印chr_err日志
 */
 		chr_err("Vbat=%d vbats=%d vbus:%d ibus:%d I=%d T=%d uisoc:%d type:%s>%s pd:%d swchg_ibat:%d cv:%d\n",
 			get_battery_voltage(info),

@@ -450,12 +450,13 @@ done:
 	ret = charger_dev_get_min_input_current(info->chg1_dev, &aicr1_min);
 	if (ret != -EOPNOTSUPP && pdata->input_current_limit < aicr1_min) {
 		pdata->input_current_limit = 0;
-		/* For TC_018, pleasae don't modify the format */
+		/* For TC_018, pleasae don't modify the format */ff
 		chr_err("min_input_current is too low %d %d\n",
 			pdata->input_current_limit, aicr1_min);
 		is_basic = true;
 	}
 	/* For TC_018, pleasae don't modify the format 输出调试日志，记录当前设置的各个电流值、充电类型、模式等信息。 */
+	// 在mtk_basic_charger.c中有同样的话，可相互印证。定时器(10秒) -> 唤醒线程 -> charger_check_status() -> do_algorithm() -> select_charging_current_limit() -> 打印chr_err日志
 	chr_err("m:%d chg1:%d,%d,%d,%d chg2:%d,%d,%d,%d dvchg1:%d sc:%d %d %d type:%d:%d usb_unlimited:%d usbif:%d usbsm:%d aicl:%d atm:%d bm:%d b:%d\n",
 		info->config,
 		_uA_to_mA(pdata->thermal_input_current_limit),
