@@ -2,6 +2,111 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2023 unisemipower.
+
+这是一个用于 UPM6910x 充电芯片的完整驱动程序，主要功能包括：
+    电池充电管理
+    USB 类型检测（SDP/CDP/DCP）
+    电压/电流调节
+    充电状态监控
+    OTG（On-The-Go）功能支持
+    系统电源管理
+
+2. 主要功能模块
+2.1 I2C 通信接口
+    static int __upm6910x_main_read_byte()
+    static int __upm6910x_main_write_byte()
+    static int upm6910x_main_read_reg()
+    static int upm6910x_main_update_bits()
+    提供了基本的 I2C 读写功能，包括寄存器读取、写入和位操作。
+
+2.2 充电控制功能
+    static int upm6910x_main_enable_charger()  // 启用充电
+    static int upm6910x_main_disable_charger() // 禁用充电
+    static int upm6910x_main_set_ichrg_curr()  // 设置充电电流
+    static int upm6910x_main_set_chrg_volt()   // 设置充电电压
+
+2.3 USB 类型检测
+    static int upm6910x_main_get_chgtype()  // 检测充电器类型
+    支持检测多种 USB 类型：
+    SDP (Standard Downstream Port)
+    CDP (Charging Downstream Port)
+    DCP (Dedicated Charging Port)
+    非标准充电器
+    未知类型
+
+2.4 电源管理
+    static int upm6910x_main_enable_vbus()    // 启用 VBUS
+    static int upm6910x_main_disable_vbus()   // 禁用 VBUS
+    static int upm6910x_main_enable_otg()     // 启用 OTG 功能
+
+2.5 安全特性
+    static int upm6910x_main_set_watchdog_timer()  // 看门狗定时器
+    static int upm6910x_main_enable_safetytimer()  // 安全定时器
+
+3. 重要数据结构
+3.1 设备结构体
+    struct upm6910x_main_device {
+        struct i2c_client *client;
+        struct device *dev;
+        // ... 其他成员
+    };
+
+3.2 充电器操作结构体
+    static struct charger_ops upm6910x_main_chg_ops = {
+        .plug_in = upm6910x_main_plug_in,
+        .plug_out = upm6910x_main_plug_out,
+        .enable = upm6910x_main_charging_switch,
+        .set_charging_current = upm6910x_main_set_ichrg_curr,
+        .set_constant_voltage = upm6910x_main_set_chrg_volt,
+        .set_input_current = upm6910x_main_set_input_curr_lim,
+        // ... 其他操作
+    };
+
+
+4. 关键特性
+4.1 电压/电流范围
+    充电电压：3.5V - 4.44V
+    充电电流：60mA - 3220mA
+    输入电压限制：3.88V - 5.08V
+    输入电流限制：100mA - 3250mA
+
+4.2 充电状态管理
+    支持多种充电状态：
+    预充电 (Pre-charge)
+    快速充电 (Fast charge)
+    终止充电 (Termination charge)
+    未充电 (Not charging)
+
+4.3 快充协议支持
+    static int upm6910x_main_send_ta_current_pattern()  // PE+ 协议
+    static int upm6910x_main_send_ta20_current_pattern() // PE+ 2.0 协议
+    static int upm6910x_main_set_ta20_reset()           // 重置协议
+
+4.4 系统集成
+    电源供应器接口 (power_supply)
+    调节器接口 (regulator)
+    中断处理
+    设备树支持
+    PM 电源管理
+
+
+5. 使用示例
+    驱动通过标准的 Linux 电源子系统接口暴露功能，可以通过以下方式使用：
+    # 查看充电状态
+    cat /sys/class/power_supply/upm6910-main-charger/status
+    # 查看充电器类型  
+    cat /sys/class/power_supply/upm6910-main-charger/real_type
+    # 查看寄存器值
+    cat /sys/class/power_supply/upm6910-main-charger/registers
+
+
+6. 硬件特性
+    支持 I2C 接口控制
+    内置电压和电流调节
+    支持温度监控和保护
+    支持安全定时器
+    支持看门狗功能
+    支持多种充电终止条件
  */
 #include <linux/types.h>
 #include <linux/init.h> /* For init/exit macros */
@@ -1624,43 +1729,90 @@ static const struct of_device_id upm6910x_main_of_match[] = {
     {},
 };
 MODULE_DEVICE_TABLE(of, upm6910x_main_of_match);
+
+/*
+功能：定义一个简单的设备电源管理操作结构体（struct dev_pm_ops），用于支持系统挂起（suspend）和恢复（resume）。
+宏说明：
+SIMPLE_DEV_PM_OPS(name, suspend_fn, resume_fn) 是内核提供的宏，简化了 dev_pm_ops 结构体的初始化。
+  它创建了一个名为 upm6910x_main_pm_ops 的静态变量，其中：
+    .suspend = upm6910x_main_suspend：当系统进入睡眠时调用此函数。
+    .resume = upm6910x_main_resume：当系统唤醒时调用此函数。
+
+1. device_may_wakeup()
+    功能：
+        检查设备是否具有唤醒系统的能力
+    原型：
+        bool device_may_wakeup(struct device *dev);
+    作用：
+        检查设备是否被配置为能够唤醒系统从睡眠状态
+        返回 true 表示设备可以唤醒系统，false 表示不能
+    对应设备树的配置：
+        wakeup-source;  // 这个属性让 device_may_wakeup() 返回 true
+
+2. enable_irq_wake()
+    功能：
+        启用中断的唤醒功能，允许中断将系统从睡眠状态唤醒
+    原型：
+        int enable_irq_wake(unsigned int irq);
+    作用：
+        将指定的中断标记为"唤醒中断"
+        当系统进入睡眠状态时，这个中断仍然能够被触发
+        当中断触发时，系统会被唤醒
+*/
 #ifdef CONFIG_PM_SLEEP
 static int upm6910x_main_suspend(struct device *dev)
 {
     struct upm6910x_main_device *upm = dev_get_drvdata(dev);
     dev_info(dev, "%s\n", __func__);
     if (device_may_wakeup(dev)) {
-        enable_irq_wake(upm->client->irq);
+        enable_irq_wake(upm->client->irq);  // 允许硬件中断唤醒系统
     }
-    disable_irq(upm->client->irq);
+    disable_irq(upm->client->irq);  // 禁用充电状态变化的中断处理
     return 0;
 }
 static int upm6910x_main_resume(struct device *dev)
 {
     struct upm6910x_main_device *upm = dev_get_drvdata(dev);
     dev_info(dev, "%s\n", __func__);
-    enable_irq(upm->client->irq);
+    enable_irq(upm->client->irq);   // 重新启用中断
     if (device_may_wakeup(dev)) {
-        disable_irq_wake(upm->client->irq);
+        disable_irq_wake(upm->client->irq); // 禁用中断唤醒功能
     }
     return 0;
 }
 static SIMPLE_DEV_PM_OPS(upm6910x_main_pm_ops, upm6910x_main_suspend, upm6910x_main_resume);
 #endif /*CONFIG_PM_SLEEP*/
+
+
 static struct i2c_driver upm6910x_main_driver = {
     .driver = {
-        .name = "upm6910x_main-charger",
-        .of_match_table = upm6910x_main_of_match,
+        .name = "upm6910x_main-charger",    // 驱动名称
+        .of_match_table = upm6910x_main_of_match,   //设备数匹配表
 #ifdef CONFIG_PM_SLEEP
-        .pm = &upm6910x_main_pm_ops,
+        .pm = &upm6910x_main_pm_ops,    // 电源管理操作
 #endif /*CONFIG_PM_SLEEP*/
     },
-    .probe = upm6910x_main_driver_probe,
-    .remove = upm6910x_main_charger_remove,
-    .shutdown = upm6910x_main_charger_shutdown,
-    .id_table = upm6910x_main_i2c_ids,
+    .probe = upm6910x_main_driver_probe,    //当设备被检测到时调用，进行设备初始化
+    .remove = upm6910x_main_charger_remove, //当设备被移除时调用，进行清理工作
+    .shutdown = upm6910x_main_charger_shutdown, //系统关机时调用，确保安全关闭
+    .id_table = upm6910x_main_i2c_ids,  // I2C 设备ID表
 };
+/*
+module_i2c_driver这个宏展开后相当于：
+static int __init upm6910x_main_init(void)
+{
+    return i2c_add_driver(&upm6910x_main_driver);
+}
+module_init(upm6910x_main_init);
+
+static void __exit upm6910x_main_exit(void)
+{
+    i2c_del_driver(&upm6910x_main_driver);
+}
+module_exit(upm6910x_main_exit);
+*/
 module_i2c_driver(upm6910x_main_driver);
+
 MODULE_AUTHOR(" zjc <jianchuang.zhao@unisemipower.com>");
 MODULE_DESCRIPTION("upm6910x_main charger driver");
 MODULE_LICENSE("GPL v2");

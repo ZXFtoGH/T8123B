@@ -6988,7 +6988,7 @@ Q3：属性名写错会怎样？
 		interrupts = <4 IRQ_TYPE_LEVEL_LOW>;
 		interrupt-controller;
 		#interrupt-cells = <1>;
-		wakeup-source;
+		wakeup-source;	//// 这个属性让 device_may_wakeup() 返回 true,函数在6910的驱动中
 		mt6375_adc: adc {
 			compatible = "mediatek,mt6375-adc";
 			#io-channel-cells = <1>;
