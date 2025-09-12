@@ -165,6 +165,26 @@ static struct charger_device *s_chg_dev_otg;
  *
  *   [I2C Function For Read/Write upm6910x_main]
  *
+ *********************************************************
+参数说明：
+    upm：指向充电器设备结构体的指针
+    reg：要读取的寄存器地址（8位）
+    data：用于存储读取结果的指针
+函数特性：
+    static：只在当前文件内可见
+    __前缀：通常表示内部函数，不直接对外调用
+
+i2c_smbus_read_byte_data() 函数：
+功能：通过I2C总线读取指定寄存器的字节数据
+参数：
+    upm->client：I2C客户端设备
+    reg：目标寄存器地址
+返回值：读取到的数据（成功时为0-255），错误时为负值
+
+*data = (u8)ret;
+数据处理：
+    类型转换：将int类型的返回值转换为u8（无符号8位）
+    存储结果：通过指针参数返回读取到的数据
  *********************************************************/
 static int __upm6910x_main_read_byte(struct upm6910x_main_device *upm, u8 reg, u8 *data)
 {
@@ -1230,11 +1250,25 @@ static int upm6910x_main_hw_init(struct upm6910x_main_device *upm)
 err_out:
     return ret;
 }
+
+//输入：指向驱动私有数据结构的指针 upm
+/*
+总结：这个函数做了什么？
+步骤	功能
+1️⃣	读取输入电压限制（VIN DPM），带默认值和范围检查
+2️⃣	读取输入电流限制（IIN DPM），带默认值和范围检查
+3️⃣	获取中断引脚 GPIO 编号
+4️⃣	申请 GPIO 并设置为输入
+5️⃣	将 GPIO 转换为中断号
+6️⃣	将中断号绑定到 i2c_client->irq，供后续注册中断使用
+*/
 static int upm6910x_main_parse_dt(struct upm6910x_main_device *upm)
 {
     int ret = 0;
-    int irq_gpio = 0, irqn = 0;
+    int irq_gpio = 0, irqn = 0; //GPIO 引脚号 irq_gpio，中断号 irqn
     dev_err(upm->dev, "[%s] enter\n", __func__);
+
+    //读取输入电压限制（Input Voltage Limit）VIN DPM，即当输入电压低于此值时，系统会降低充电电流以保护电源（比如避免拉垮 USB 口电压）。
     ret = device_property_read_u32(upm->dev,
                        "input-voltage-limit-microvolt",
                        &upm->init_data.vlim);
@@ -1245,6 +1279,8 @@ static int upm6910x_main_parse_dt(struct upm6910x_main_device *upm)
         upm->init_data.vlim < UPM6910_MAIN_VINDPM_V_MIN_uV) {
         return -EINVAL;
     }
+
+    //读取输入电流限制（Input Current Limit）IIN DPM，也就是充电器能从适配器或 USB 获取的最大电流。
     ret = device_property_read_u32(upm->dev, "input-current-limit-microamp",
                        &upm->init_data.ilim);
     if (ret) {
@@ -1254,24 +1290,47 @@ static int upm6910x_main_parse_dt(struct upm6910x_main_device *upm)
         upm->init_data.ilim < UPM6910_MAIN_IINDPM_I_MIN_uA) {
         return -EINVAL;
     }
+
+    //获取中断引脚 GPIO
     irq_gpio = of_get_named_gpio(upm->dev->of_node, "upm6910x_main,intr_gpio", 0);
-    if (!gpio_is_valid(irq_gpio)) {
+    if (!gpio_is_valid(irq_gpio)) {     //gpio_is_valid() 判断是否是一个有效的 GPIO 编号
         dev_err(upm->dev, "%s: %d gpio get failed\n", __func__,
             irq_gpio);
         return -EINVAL;
     }
+
+    /*
+    使用 gpio_request() 向内核申请使用这个 GPIO，防止被其他模块占用。
+    第二个参数是标签（label），便于调试查看。
+    */
     ret = gpio_request(irq_gpio, "upm6910x_main irq pin");
     if (ret) {
         dev_err(upm->dev, "%s: %d gpio request failed\n", __func__,
             irq_gpio);
         return ret;
     }  
+
+    /*
+    设置 GPIO 方向为输入
+    中断引脚是芯片输出给主控的信号线，所以主控端必须设为 输入模式。
+    不需要设置上拉/下拉，通常由硬件电路决定（一般已有上拉电阻）。
+    */
     gpio_direction_input(irq_gpio);
-    irqn = gpio_to_irq(irq_gpio);
+
+    /*
+    将 GPIO 转换为中断号
+    */
+    irqn = gpio_to_irq(irq_gpio);   //将 GPIO 编号转换成对应的 中断号（IRQ number）。Linux 内核通过中断号来注册中断处理程序
     if (irqn < 0) {
         dev_err(upm->dev, "%s:%d gpio_to_irq failed\n", __func__, irqn);
         return irqn;
     }
+
+    /*
+    把得到的中断号赋值给 i2c_client->irq。
+    这一步非常关键！因为在前面 probe 函数中，判断 if (client->irq) 是否存在中断，进而调用 devm_request_threaded_irq(...) 注册中断服务例程。
+    ✅ 相当于告诉 I2C 核心：“这个设备有一个中断，用的是这个 IRQ”。
+    */
     upm->client->irq = irqn;
     dev_err(upm->dev, "[%s] loaded\n", __func__);
     return 0;
@@ -1620,6 +1679,23 @@ static const struct attribute_group upm6910x_main_attr_group = {
 	.attrs = upm6910x_main_attributes,
 };
 
+/*
+总结：整个 probe 函数做了什么？
+步骤	功能
+1	分配内存并初始化私有数据结构
+2	检查芯片是否存在（通过 Chip ID）
+3	解析设备树中的平台配置
+4	注册 wake lock 防止误休眠
+5	向 charger framework 注册设备
+6	初始化电源供应类（battery info 可见）
+7	初始化硬件寄存器
+8	注册中断处理程序（响应插拔事件）
+9	注册 OTG regulator（支持反向供电）
+10	启动延迟工作队列，开始检测充电状态
+11	添加 sysfs 调试接口
+
+最终效果：系统启动后，该芯片被正确识别 → 注册为充电控制器 → 可以上报电池信息 → 支持插入充电自动检测 → 支持 OTG 输出 → 支持低功耗唤醒。
+*/
 static int upm6910x_main_driver_probe(struct i2c_client *client,
                  const struct i2c_device_id *id)
 {
@@ -1632,13 +1708,20 @@ static int upm6910x_main_driver_probe(struct i2c_client *client,
     if (!upm) {
         return -ENOMEM;
     }
+
+    /*
+    将 I2C 客户端和设备指针保存到私有结构中。
+    初始化两个互斥锁：
+    lock：保护整个设备操作。
+    i2c_rw_lock：初始化I2C读写锁，防止并发 I2C 读写导致数据错乱
+    */
     upm->client = client;
     upm->dev = dev;
     mutex_init(&upm->lock);
     mutex_init(&upm->i2c_rw_lock);
   
-    i2c_set_clientdata(client, upm);
-    ret = upm6910x_main_hw_chipid_detect(upm);
+    i2c_set_clientdata(client, upm);    // 设置客户端数据，将 upm 指针绑定到 i2c_client 上，后续可通过 i2c_get_clientdata(client) 在其他函数中获取
+    ret = upm6910x_main_hw_chipid_detect(upm);  //调用硬件检测函数读取芯片 ID， 如果返回值不等于预期的型号 ID (UPM6910_MAIN_PN_ID)，说明不是目标芯片或通信失败，直接退出。这是关键的安全检查，避免错误初始化非目标设备。 
     if (ret != UPM6910_MAIN_PN_ID) {
         pr_info("[%s] device not found !!!\n", __func__);
         return ret;
@@ -1646,12 +1729,30 @@ static int upm6910x_main_driver_probe(struct i2c_client *client,
     ret = upm6910x_main_parse_dt(upm);
     if (ret) {
         pr_info("[%s] upm6910x_main_parse_dt failed !!!\n", __func__);
-        // return ret;
+        // return ret;  //这里没有return，可能是允许部分配置失败
     }
+
+    /*
+    创建唤醒源
+    注册一个“唤醒源”，防止系统在充电事件发生时意外进入深度睡眠。
+    当中断触发时，可以通过这个 wakelock 唤醒系统。
+    devm_kasprintf 是带资源管理的字符串创建函数。
+    */
     name = devm_kasprintf(upm->dev, GFP_KERNEL, "%s",
                   "upm6910x_main suspend wakelock");
     upm->charger_wakelock = wakeup_source_register(NULL, name);
-    /* Register charger device */
+
+    /* Register charger device 
+    向 MediaTek 的 charger class framework 注册一个充电控制器设备。
+    参数说明：
+    "primary_chg"：设备名。
+    &client->dev：父设备。
+    upm：私有数据。
+    &upm6910x_main_chg_ops：提供充电控制接口（如 enable_charging, set_ichg 等）。
+    &upm6910x_main_chg_props：描述设备能力（支持哪些功能）。
+    如果注册失败，则返回错误码。
+    💡 这一步非常重要，使得上层用户空间（如 Android 的 healthd 或 kernel power supply）可以控制充电行为。
+    */
     upm->chg_dev =
         charger_device_register("primary_chg", &client->dev, upm,
                     &upm6910x_main_chg_ops, &upm6910x_main_chg_props);
@@ -1661,22 +1762,39 @@ static int upm6910x_main_driver_probe(struct i2c_client *client,
         return ret;
     }
     /* otg regulator */
-    s_chg_dev_otg = upm->chg_dev;
-    INIT_DELAYED_WORK(&upm->charge_detect_delayed_work,
-              charger_detect_work_func);
-    INIT_DELAYED_WORK(&upm->charge_detect_recheck_delay_work,
-              charge_detect_recheck_delay_work_func);
+    s_chg_dev_otg = upm->chg_dev;   //全局变量 s_chg_dev_otg 保存对 OTG（On-The-Go）供电设备的引用，供外部模块调用（比如开启/关闭反向供电）。
+    
+    //初始化延迟工作队列
+    INIT_DELAYED_WORK(&upm->charge_detect_delayed_work, charger_detect_work_func);
+    INIT_DELAYED_WORK(&upm->charge_detect_recheck_delay_work, charge_detect_recheck_delay_work_func);
+    
+    //初始化电源供应（Power Supply Class）
     ret = upm6910x_main_power_supply_init(upm, dev);
     if (ret) {
         pr_err("Failed to register power supply\n");
         return ret;
     }
+
+    /*
+    设置标志位 chg_config = false，表示尚未完成配置。
+    调用 upm6910x_main_hw_init() 对芯片进行寄存器初始化（设置默认充电电流、电压、使能中断等）。
+    */
     upm->chg_config = false;
     ret = upm6910x_main_hw_init(upm);
     if (ret) {
         dev_err(dev, "Cannot initialize the chip.\n");
         return ret;
     }
+
+    /*
+    请求中断处理程序
+    如果设备定义了中断线（IRQ）：
+    使用线程化中断（devm_request_threaded_irq）处理复杂耗时操作。
+    中断触发方式为下降沿触发（插拔事件）。
+    upm6910x_main_irq_handler_thread 是真正的中断服务函数。
+    启用中断作为唤醒源（enable_irq_wake）。
+    标记设备支持唤醒（device_init_wakeup）。
+    */
     if (client->irq) {
         ret = devm_request_threaded_irq(
             dev, client->irq, NULL, upm6910x_main_irq_handler_thread,
@@ -1688,14 +1806,13 @@ static int upm6910x_main_driver_probe(struct i2c_client *client,
         enable_irq_wake(client->irq);
         device_init_wakeup(upm->dev, true);
     }
-    ret = upm6910x_main_vbus_regulator_register(upm);
-    schedule_delayed_work(&upm->charge_detect_delayed_work,
-            msecs_to_jiffies(100));
-    ret = sysfs_create_group(&upm->dev->kobj, &upm6910x_main_attr_group);
+    ret = upm6910x_main_vbus_regulator_register(upm);   //注册一个 regulator 子系统设备，用于控制 USB VBUS 输出（即手机作为主机给外设供电，OTG 功能）。
+    schedule_delayed_work(&upm->charge_detect_delayed_work, msecs_to_jiffies(100)); //100ms 后执行第一次充电检测任务，用于判断是否插入了充电器或 USB 线缆。 延迟是为了等待硬件稳定。
+    ret = sysfs_create_group(&upm->dev->kobj, &upm6910x_main_attr_group);   //创建一组 sysfs 属性文件（位于 /sys/devices/.../），供调试或测试使用（例如读写寄存器、强制模式切换等）。
 	if (ret)
 		dev_err(upm->dev, "failed to register sysfs. err: %d\n", ret);
     pr_err("[%s] probe success\n", __func__);
-    upm6910x_main_detect_flag = 1;
+    upm6910x_main_detect_flag = 1;  //设置全局标志 upm6910x_main_detect_flag = 1，表明芯片已成功探测并初始化。
     return ret;
 }
 static int upm6910x_main_charger_remove(struct i2c_client *client)
@@ -1765,16 +1882,18 @@ static int upm6910x_main_suspend(struct device *dev)
     struct upm6910x_main_device *upm = dev_get_drvdata(dev);
     dev_info(dev, "%s\n", __func__);
     if (device_may_wakeup(dev)) {
-        enable_irq_wake(upm->client->irq);  // 允许硬件中断唤醒系统
+        enable_irq_wake(upm->client->irq);  // 允许硬件中断唤醒系统，插入拔出充电器   // 启用唤醒功能：硬件仍然监测中断，可以唤醒系统
     }
-    disable_irq(upm->client->irq);  // 禁用充电状态变化的中断处理
+    disable_irq(upm->client->irq);  // 禁用充电状态变化的中断处理,dts中配置的中断号   // 禁用中断处理：软件不处理中断，但硬件仍然记录
     return 0;
 }
 static int upm6910x_main_resume(struct device *dev)
 {
     struct upm6910x_main_device *upm = dev_get_drvdata(dev);
     dev_info(dev, "%s\n", __func__);
-    enable_irq(upm->client->irq);   // 重新启用中断
+    enable_irq(upm->client->irq);   // 重新启用中断     // 1. 重新启用软件中断处理
+
+    // 2. 如果之前启用了唤醒，现在禁用它
     if (device_may_wakeup(dev)) {
         disable_irq_wake(upm->client->irq); // 禁用中断唤醒功能
     }
