@@ -2,6 +2,22 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 // upm6910 Charger Driver
 // Copyright (c) 2023 unisemipower.
+
+/*
+总结：为什么 unsigned char 表示整数？
+问题	                        解答
+char 是字符类型吗？	        ❌ 不完全是。它是 1 字节整数类型，常用于存储字符编码
+unsigned char 是整数吗？	✅ 是的，它是 0~255 的无符号整数，专门用于表示字节级别的数值
+为什么不用 int 表示字节？	因为 int 太大（通常 4 字节），无法精确表示单个字节
+什么时候用 char？	        处理文本、字符串时
+什么时候用 unsigned char？	处理二进制数据、图像、网络包、硬件寄存器等字节数据时
+
+🔚 一句话总结：
+char 和 unsigned char 都是整数类型，区别在于：
+char 常用于文本（但本质仍是整数）
+unsigned char 更明确地表示“0~255 的字节整数”，避免符号问题，更适合二进制数据处理。
+如果你在写串口通信、图像处理、加密算法等代码，unsigned char 才是真正的“字节整数”首选类型。
+*/
 #ifndef _UPM6910_MAIN_CHARGER_H
 #define _UPM6910_MAIN_CHARGER_H
 #include <linux/i2c.h>
@@ -66,10 +82,55 @@
 #define UPM6910_MAIN_VSYS_STAT        BIT(0)
 #define UPM6910_MAIN_THERM_STAT        BIT(1)
 #define UPM6910_MAIN_PG_STAT        BIT(2)
+
+/*
+功能：
+生成一个从第3位到第4位的位掩码
+计算结果：
+GENMASK(4, 3) = 0b00011000 = 0x18
+等价于：(1 << 3) | (1 << 4) 或 (0x08 | 0x10) = 0x18
+作用：
+用于提取寄存器中第3和第4位（充电状态位），忽略其他位。
+// 等价于 GENMASK(4, 3)
+#define UPM6910_MAIN_CHG_STAT_MASK    0x18
+*/
 #define UPM6910_MAIN_CHG_STAT_MASK    GENMASK(4, 3)
+
+/*
+BIT(3) = 0b00001000 = 0x08
+BIT(3) 表示第 3 位被置 1，即 (1 << 3) = 0x08
+表示设备处于预充电阶段（小电流充电）
+// 等价于 BIT(3)  
+#define UPM6910_MAIN_PRECHRG          0x08
+*/
 #define UPM6910_MAIN_PRECHRG        BIT(3)
+
+/*
+BIT(4) = 0b00010000 = 0x10
+BIT(4) 表示第 4 位被置 1，即 (1 << 4) = 0x10
+表示设备处于快速充电阶段（大电流充电）
+// 等价于 BIT(4)
+#define UPM6910_MAIN_FAST_CHRG        0x10
+*/
 #define UPM6910_MAIN_FAST_CHRG        BIT(4)
-#define UPM6910_MAIN_TERM_CHRG        (BIT(3)| BIT(4))
+
+/*
+BIT(3) | BIT(4) = 0b00011000 = 0x18
+同时设置了 bit3 和 bit4，即 0x08 | 0x10 = 0x18
+作用：表示设备处于终止充电状态（充电完成）
+// 等价于 (BIT(3)| BIT(4))
+#define UPM6910_MAIN_TERM_CHRG        0x18
+*/
+#define UPM6910_MAIN_TERM_CHRG        (BIT(3) | BIT(4))
+
+/*
+使用 GENMASK 和 BIT 的优势
+可读性更好：明确指示位的位置
+可维护性：修改位位置时只需改数字
+避免魔术数字：不使用硬编码的十六进制值
+编译器优化：这些宏在编译时会被计算为常量
+*/
+
 /* charge type  */
 #define UPM6910_MAIN_VBUS_STAT_MASK    GENMASK(7, 5)
 #define UPM6910_MAIN_NOT_CHRGING    0
@@ -181,7 +242,15 @@ struct upm6910x_main_init_data {
 struct upm6910x_main_state {
     bool therm_stat;
     bool online;
-    u8 chrg_stat;
+/*
+u8 chrg_stat; 的作用是：
+声明一个8位变量：用于存储寄存器值
+内存高效：只占用1字节空间
+硬件匹配：与8位寄存器大小一致
+无符号设计：适合存储原始寄存器数据
+类型安全：明确数据的大小和含义
+*/
+    u8 chrg_stat;   //声明一个8位无符号整型变量   u8：typedef定义的无符号8位整数类型  typedef unsigned char u8;  // 无符号8位整数
     u8 vbus_status;
     u8 vbus_attach;
     bool chrg_en;

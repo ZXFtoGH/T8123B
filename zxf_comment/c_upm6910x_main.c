@@ -588,9 +588,9 @@ static int upm6910x_main_get_vreg(struct upm6910x_main_device *upm,  unsigned in
 }
 static int upm6910x_main_get_chrg_stat(struct upm6910x_main_device *upm)
 {
-    u8 chrg_stat = 0;
-    int chrg_value = 0;
-    int ret = 0;
+    u8 chrg_stat = 0;    // 存储从寄存器读出的原始状态值
+    int chrg_value = 0;  // 最终要返回的内核标准充电状态
+    int ret = 0;         // 用于保存 I2C 读操作的返回值（0=成功，<0=失败）
     ret = upm6910x_main_read_reg(upm, UPM6910_MAIN_CHRG_STAT, &chrg_stat);
     if (ret) {
         ret = upm6910x_main_read_reg(upm, UPM6910_MAIN_CHRG_STAT, &chrg_stat);
@@ -600,12 +600,12 @@ static int upm6910x_main_get_chrg_stat(struct upm6910x_main_device *upm)
         }
     }
     chrg_stat = chrg_stat & UPM6910_MAIN_CHG_STAT_MASK;
-    chrg_value = POWER_SUPPLY_STATUS_CHARGING;
-    if (!upm->state.chrg_type || (upm->state.chrg_type == UPM6910_MAIN_OTG_MODE)) {
+    chrg_value = POWER_SUPPLY_STATUS_CHARGING;  // 默认设为充电中，后续根据实际情况进行赋值
+    if (!upm->state.chrg_type || (upm->state.chrg_type == UPM6910_MAIN_OTG_MODE)) { //没有充电器连接  或者  OTG模式（设备作为主机），则设置为放电状态
         chrg_value = POWER_SUPPLY_STATUS_DISCHARGING;
     } else if (!chrg_stat) {
         if (upm->chg_config) {
-            chrg_value = POWER_SUPPLY_STATUS_CHARGING;
+            chrg_value = POWER_SUPPLY_STATUS_CHARGING;  //upm->chg_config == true 用户或系统启用了充电功能（配置允许充电）
         } else {
             chrg_value = POWER_SUPPLY_STATUS_NOT_CHARGING;
         }
@@ -971,17 +971,63 @@ static int upm6910x_main_charger_set_property(struct power_supply *psy,
     }
     return ret;
 }
+/*
+这是一段 Linux 内核中 电源管理子系统（power_supply class）的 get_property 回调函数，用于响应用户空间或内核其他模块(通过：power_supply_get_property函数进行调用)对充电芯片状态的查询。
+它的作用是：当有人读取 /sys/class/power_supply/upm6910-main-charger/xxx 文件时（如 status、online），内核就会调用这个函数来获取实际值。
+
+参数	    含义
+psy	    当前电源设备指针（即注册的那个 upm->charger）
+psp	    要获取的属性类型，例如 POWER_SUPPLY_PROP_STATUS
+val	    输出参数，用于返回属性值（可以是整数 .intval 或字符串 .strval）
+
+一、struct power_supply *psy 是什么？
+psy 是一个指向 已注册的电源设备（Power Supply Device） 的指针。
+它代表的是你之前通过 devm_power_supply_register() 注册成功的那个设备，比如：
+upm->charger = devm_power_supply_register(...);
+👉 所以：
+struct power_supply *psy 就是 upm->charger
+
+[用户读文件] 
+   ↓
+/sys/class/power_supply/upm6910-main-charger/status
+   ↓
+内核找到对应的 struct power_supply *psy（就是 upm->charger）
+   ↓
+调用 psy->desc->get_property(psy, POWER_SUPPLY_PROP_STATUS, val)
+   ↓
+你的 get_property 函数被调用，参数 psy 自动传入
+   ↓
+用 power_supply_get_drvdata(psy) 拿到 upm
+   ↓
+通过 upm 访问芯片寄存器、I2C、状态缓存等
+   ↓
+填充 val->intval 并返回
+*/
 static int upm6910x_main_charger_get_property(struct power_supply *psy,
                      enum power_supply_property psp,
                      union power_supply_propval *val)
 {
+    /*
+    从 psy（电源设备）中提取之前绑定的私有数据 upm。
+    这个 upm 是你在 probe 或初始化时通过 .drv_data = upm 保存进去的。
+    后续就可以通过 upm 访问芯片寄存器、I2C 接口、缓存状态等。
+    ✅ 相当于：“我知道是谁被查询了”。
+    */
     struct upm6910x_main_device *upm = power_supply_get_drvdata(psy);
+
     struct upm6910x_main_state state;
     int ret = 0;
     unsigned int data = 0;
+
+    /*
+    upm->state 是一个由中断、定时任务等异步更新的共享结构体。
+    直接读可能遇到 数据不一致（比如一半旧值一半新值）。
+    所以用互斥锁保护，并复制一份“快照”给当前查询使用。
+    */
     mutex_lock(&upm->lock);
     memcpy(&state, &upm->state, sizeof(upm->state));
     mutex_unlock(&upm->lock);
+
     switch (psp) {
     case POWER_SUPPLY_PROP_STATUS:
         ret = upm6910x_main_get_chrg_stat(upm);
@@ -1157,7 +1203,7 @@ static char *upm6910x_main_charger_supplied_to[] = {
     "mtk-master-charger",
 };
 static struct power_supply_desc upm6910x_main_power_supply_desc = {
-    .name = "upm6910-main-charger",
+    .name = "upm6910-main-charger",     //设备名称，在 /sys/class/power_supply/ 下显示为目录名
     .type = POWER_SUPPLY_TYPE_USB,
     .usb_types = upm6910x_main_usb_type,
     .num_usb_types = ARRAY_SIZE(upm6910x_main_usb_type),
@@ -1167,20 +1213,90 @@ static struct power_supply_desc upm6910x_main_power_supply_desc = {
     .set_property = upm6910x_main_charger_set_property,
     .property_is_writeable = upm6910x_main_property_is_writeable,
 };
+/*
+这段代码是 upm6910x_main 充电芯片驱动中用于 注册一个电源供应设备（Power Supply） 的函数，它将充电芯片作为
+系统中的一个“电源”角色暴露给内核和用户空间，使得上层系统（如 Android 电池服务）可以获取其状态。
+*/
 static int upm6910x_main_power_supply_init(struct upm6910x_main_device *upm,
                       struct device *dev)
 {
+    //定义电源设备配置结构体
     struct power_supply_config psy_cfg = {
-        .drv_data = upm,
-        .of_node = dev->of_node,
+        .drv_data = upm,    // 将驱动私有数据 upm 绑定到这个电源设备，后续在 get_property / set_property 回调中可以通过 power_supply_get_drvdata(psy) 获取 upm，从而访问芯片寄存器。
+        .of_node = dev->of_node,    // .of_node：关联的设备树节点，用于属性解析
     };
+
+    //设置供电对象（谁依赖我？），这个充电器为哪些其他电源设备提供能量输入（表示：“我是 battery 和 mtk-master-charger 的电源来源）
     psy_cfg.supplied_to = upm6910x_main_charger_supplied_to;
     psy_cfg.num_supplicants = ARRAY_SIZE(upm6910x_main_charger_supplied_to);
-    memcpy(&upm->psy_desc, &upm6910x_main_power_supply_desc,
-           sizeof(upm->psy_desc));
-    upm->charger =
-        devm_power_supply_register(upm->dev, &upm->psy_desc, &psy_cfg);
-    if (IS_ERR(upm->charger)) {
+
+    /*
+    将一个预定义的“电源设备描述模板”复制到当前驱动实例的私有结构体中，以便后续注册电源设备时使用。
+    部分	                        说明
+    memcpy(...)	                    C 标准库函数，用于内存块拷贝：void *memcpy(void *dest, const void *src, size_t n);
+    &upm->psy_desc	                目标地址：驱动私有数据 upm 中的一个字段，类型为 struct power_supply_desc
+    &upm6910x_main_power_supply_desc	源地址：一个全局常量，描述了这个充电芯片的能力和属性
+    sizeof(upm->psy_desc)	            要复制的字节数，即 power_supply_desc 结构体的大小
+
+    你可能会问：为什么不直接写成： upm->psy_desc = upm6910x_main_power_supply_desc; // 直接赋值？
+    其实 也可以，因为 struct power_supply_desc 是普通结构体，支持赋值操作。但使用 memcpy 是一种更通用、更常见的做法，尤其是在内核驱动中，原因如下：
+    ✔️ 1. 避免直接依赖结构体赋值语法
+    某些编译器或旧版本内核可能对大结构体赋值支持不佳。
+    memcpy 是底层、可靠的内存复制方式。
+    ✔️ 2. 统一风格
+    Linux 内核中很多驱动都用 memcpy 来初始化结构体，保持代码风格一致。
+    ✔️ 3. 便于动态修改（虽然这里不是）
+    如果将来需要根据设备型号微调描述符，可以先拷贝模板，再修改某些字段。
+
+    替代方案对比：
+    方案1：直接赋值（不可行）
+        upm->psy_desc = upm6910x_main_power_supply_desc;  // 错误：结构体包含指针
+    方案2：逐个字段赋值（繁琐）
+        upm->psy_desc.name = upm6910x_main_power_supply_desc.name;
+        upm->psy_desc.type = upm6910x_main_power_supply_desc.type;
+        // ... 十几个字段都要手动赋值
+    方案3：memcpy（推荐）
+        memcpy(&upm->psy_desc, &upm6910x_main_power_supply_desc, sizeof(upm->psy_desc));
+
+    四、为什么要拷贝到 upm->psy_desc？
+    upm6910x_main_power_supply_desc 是 只读的全局常量，不能修改。
+    但在实际注册时，某些字段可能需要被 动态修改或填充（例如 .name 可能带编号）。
+    更重要的是：每个设备实例（upm）都需要自己的一份副本，避免多实例冲突。
+    所以：🔁 模板（全局常量） → 拷贝 → 实例（私有数据） → 注册
+
+    拷贝完成后，upm->psy_desc 就可以用于注册电源设备：
+    upm->charger = devm_power_supply_register(upm->dev, &upm->psy_desc, &psy_cfg);
+    此时内核会读取 upm->psy_desc 中的信息，创建 /sys/class/power_supply/upm6910-main-charger/ 目录，并绑定各种属性文件。
+
+    六、总结
+    内容	说明
+    代码	memcpy(&upm->psy_desc, &upm6910x_main_power_supply_desc, sizeof(upm->psy_desc));
+    目的	将预定义的电源设备描述模板复制到当前驱动实例中
+    原因	避免直接修改全局常量，支持多实例、便于后续注册
+    类比	像是“拿一张标准表格模板，填写到自己的档案本上”
+    结果	为 devm_power_supply_register() 准备好设备描述信息
+
+    一句话总结：这行代码把一个“充电芯片的功能说明书”（模板）复制到当前设备的私人档案中，以便后续向系统正式“自我介绍”，是注册电源设备前的关键准备步骤
+    */
+    memcpy(&upm->psy_desc, &upm6910x_main_power_supply_desc, sizeof(upm->psy_desc));
+
+    /*
+    核心操作：注册电源设备！
+    使用 devm_power_supply_register() 向内核注册一个新的电源设备。
+    成功后会在 /sys/class/power_supply/ 下创建目录： /sys/class/power_supply/upm6910-main-charger/
+    所有 .properties 定义的字段都会变成可读文件。
+    用户空间（如 Android 的 BatteryService）通过读取这些文件来更新 UI（例如显示“正在快充”）。
+
+    功能说明：调用内核 API 向 power_supply class 注册一个新的电源设备。
+    参数说明： upm->dev：父设备（通常是 I2C client 设备）
+              &upm->psy_desc：设备描述（支持什么属性、怎么读写）
+              &psy_cfg：配置（私有数据、supplied_to 等）
+    devm_ 前缀含义：
+            使用设备资源管理机制（Device Managed Resource）。
+            注册的电源设备会在驱动卸载时 自动注销，无需手动调用 power_supply_unregister()。
+    */
+    upm->charger = devm_power_supply_register(upm->dev, &upm->psy_desc, &psy_cfg);
+    if (IS_ERR(upm->charger)) {     //IS_ERR() 判断返回值是否是一个错误指针（如 -ENOMEM, -ENODEV）。
         return -EINVAL;
     }
     return 0;
@@ -1733,10 +1849,68 @@ static int upm6910x_main_driver_probe(struct i2c_client *client,
     }
 
     /*
-    创建唤醒源
-    注册一个“唤醒源”，防止系统在充电事件发生时意外进入深度睡眠。
+    创建唤醒源和注册一个“唤醒源”，防止系统在关键充电事件发生时进入深度睡眠，确保能够及时响应中断。
     当中断触发时，可以通过这个 wakelock 唤醒系统。
-    devm_kasprintf 是带资源管理的字符串创建函数。
+    代码	                         作用
+    devm_kasprintf(...)	            创建一个带资源管理的字符串，作为唤醒源名称
+    wakeup_source_register(...)	    注册一个唤醒源，用于控制系统的休眠行为
+
+    name = devm_kasprintf(upm->dev, GFP_KERNEL, "%s", "upm6910x_main suspend wakelock");
+    功能说明：
+        使用 devm_kasprintf() 创建一个动态字符串，内容是 "upm6910x_main suspend wakelock"。
+        这个字符串将作为 唤醒源的名称，用于调试和跟踪。
+        🔍 函数解析：
+        devm_kasprintf() 是内核提供的安全字符串复制函数：
+        devm_ 前缀表示：内存由设备资源管理器自动管理，设备卸载时自动释放，无需手动调用 kfree()。
+        upm->dev：关联的设备结构体，用于绑定生命周期。
+        GFP_KERNEL：内存分配标志，在正常上下文中使用。
+        "%s", "..."：格式化字符串，这里只是简单复制。
+        "upm6910x_main suspend wakelock"：要格式化的内容
+
+    upm->charger_wakelock = wakeup_source_register(NULL, name);
+        向内核注册一个 wakeup source（唤醒源），名字是上面创建的字符串。
+        当这个唤醒源被“激活”时，它会阻止系统进入挂起（suspend）状态；或者当系统处于低功耗状态时，可通过硬件中断唤醒系统。
+
+        wakeup_source_register(struct device *dev, const char *name)：
+        参数1：通常传 NULL 或设备指针。传 NULL 表示使用通用唤醒源机制。
+        参数2：唤醒源的名字（即 name）。
+        返回值：指向 struct wakeup_source 的指针，保存在 upm->charger_wakelock 中，后续用于加锁/解锁。
+        ⚠️ 注意：老版本内核使用 wake_lock_register()，新版本统一为 wakeup_source_register()。
+    
+        应用示例：
+        // 充电检测工作中保持唤醒
+        static void charger_detect_work_func(struct work_struct *work)
+        {
+            struct upm6910x_main_device *upm = container_of(work, ...);
+            
+            // 保持系统唤醒
+            __pm_stay_awake(upm->charger_wakelock);
+            
+            // 执行充电检测
+            detect_charging_status();
+            
+            // 完成后释放
+            __pm_relax(upm->charger_wakelock);
+        }
+
+        // 中断处理中保持唤醒
+        static irqreturn_t upm6910x_main_irq_handler_thread(int irq, void *private)
+        {
+            struct upm6910x_main_device *upm = private;
+            
+            // 中断到来时保持唤醒
+            __pm_stay_awake(upm->charger_wakelock);
+            
+            // 处理中断
+            handle_charger_interrupt();
+            
+            // 调度工作队列
+            schedule_delayed_work(...);
+            
+            return IRQ_HANDLED;
+            // 注意：这里没有直接调用 __pm_relax()
+            // 因为可能在work中还需要保持唤醒
+        }
     */
     name = devm_kasprintf(upm->dev, GFP_KERNEL, "%s",
                   "upm6910x_main suspend wakelock");
@@ -1745,26 +1919,49 @@ static int upm6910x_main_driver_probe(struct i2c_client *client,
     /* Register charger device 
     向 MediaTek 的 charger class framework 注册一个充电控制器设备。
     参数说明：
-    "primary_chg"：设备名。
-    &client->dev：父设备。
-    upm：私有数据。
-    &upm6910x_main_chg_ops：提供充电控制接口（如 enable_charging, set_ichg 等）。
-    &upm6910x_main_chg_props：描述设备能力（支持哪些功能）。
+    参数	                类型	                说明
+    "primary_chg"	        const char *	        充电器设备名称
+    &client->dev	        struct device *	        父设备指针
+    upm	                    void *	            驱动私有数据
+    &upm6910x_main_chg_ops	struct charger_ops *	充电器操作函数集
+    &upm6910x_main_chg_props	struct charger_properties *	充电器属性
     如果注册失败，则返回错误码。
+    IS_ERR_OR_NULL() 宏：
+        检查指针是否为错误指针或NULL指针
+        比单独的 IS_ERR() 更严格
+
+    PTR_ERR() 宏：
+        从错误指针中提取错误码
+        错误指针通常包含错误信息（如 -ENOMEM）
     💡 这一步非常重要，使得上层用户空间（如 Android 的 healthd 或 kernel power supply）可以控制充电行为。
     */
-    upm->chg_dev =
-        charger_device_register("primary_chg", &client->dev, upm,
+    upm->chg_dev = charger_device_register("primary_chg", &client->dev, upm,
                     &upm6910x_main_chg_ops, &upm6910x_main_chg_props);
     if (IS_ERR_OR_NULL(upm->chg_dev)) {
         pr_info("%s: register charger device  failed\n", __func__);
         ret = PTR_ERR(upm->chg_dev);
         return ret;
     }
-    /* otg regulator */
-    s_chg_dev_otg = upm->chg_dev;   //全局变量 s_chg_dev_otg 保存对 OTG（On-The-Go）供电设备的引用，供外部模块调用（比如开启/关闭反向供电）。
+    /* otg regulator 
+     为什么需要机型全局变量赋值？
+    在嵌入式系统（尤其是手机）中，OTG 功能 是指让手机作为“电源”给其他设备供电（如给蓝牙耳机、U盘、手环充电）。
+    要实现这个功能，需要：
+        打开芯片的 升压模式（Boost Mode）
+        设置输出电压/电流
+        启用 VBUS 输出
+    而这些操作都必须通过 charger_device 接口来完成。但由于 OTG 控制逻辑可能分布在不同的文件或函数中（例如在 otg_core.c 或 dual_role_usb.c 中），它们无法直接访问局部变量 upm->chg_dev。
+    👉 所以需要一个 全局可访问的引用 —— 这就是 s_chg_dev_otg 的作用。
+    */
+    s_chg_dev_otg = upm->chg_dev;   //是一个 全局变量赋值操作，其目的是 保存对主充电设备的引用（指针），以便在后续其他模块（尤其是 OTG 相关功能）中能够方便地访问该充电设备，进行反向供电（OTG）控制
     
     //初始化延迟工作队列
+    /*
+    4. 延迟工作队列的作用
+    在充电器驱动中的具体用途：
+        异步处理：避免在中断上下文中执行复杂操作
+        延迟执行：等待硬件稳定或避免频繁操作
+        任务调度：定期执行检测任务
+    */
     INIT_DELAYED_WORK(&upm->charge_detect_delayed_work, charger_detect_work_func);
     INIT_DELAYED_WORK(&upm->charge_detect_recheck_delay_work, charge_detect_recheck_delay_work_func);
     
