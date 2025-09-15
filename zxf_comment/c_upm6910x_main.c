@@ -216,20 +216,26 @@ static int upm6910x_main_read_reg(struct upm6910x_main_device *upm, u8 reg, u8 *
     mutex_unlock(&upm->i2c_rw_lock);
     return ret;
 }
+/*
+安全地修改充电芯片寄存器中的某些位，而不影响其他位。
+它通过“读-改-写”三步操作，并用互斥锁保护 I2C 通信，是硬件寄存器操作的标准且安全的做法。
+
+__ 前缀的 __upm6910x_main_read_byte 通常表示“内部函数”，不对外暴露
+*/
 static int upm6910x_main_update_bits(struct upm6910x_main_device *upm, u8 reg, u8 mask,
                 u8 val)
 {
     int ret = 0;
     u8 tmp = 0;
     mutex_lock(&upm->i2c_rw_lock);
-    ret = __upm6910x_main_read_byte(upm, reg, &tmp);
+    ret = __upm6910x_main_read_byte(upm, reg, &tmp);    //调用底层函数从寄存器 reg 读取一个字节，存入 tmp
     if (ret) {
         pr_err("Failed: reg=%02X, ret=%d\n", reg, ret);
         goto out;
     }
     tmp &= ~mask;
     tmp |= val & mask;
-    ret = __upm6910x_main_write_byte(upm, reg, tmp);
+    ret = __upm6910x_main_write_byte(upm, reg, tmp);    //将修改后的 tmp 写回寄存器 reg
     if (ret) {
         pr_err("Failed: reg=%02X, ret=%d\n", reg, ret);
     }
@@ -669,8 +675,7 @@ static int upm6910x_main_get_chgtype(struct upm6910x_main_device *upm,
         }
     }
     state->chrg_type = chrg_stat & UPM6910_MAIN_VBUS_STAT_MASK;
-    pr_err("[%s] chrg_type = 0x%x\n", __func__,
-           state->chrg_type);
+    pr_err("[%s] chrg_type = 0x%x\n", __func__, state->chrg_type);
     switch (state->chrg_type) {
     case UPM6910_MAIN_NOT_CHRGING:
         pr_err("UPM6910_MAIN charger type: NONE\n");
@@ -820,17 +825,24 @@ static void upm6910x_main_qc20_9v(struct upm6910x_main_device *upm)
 	if(QC_flag){
 		QC_flag = 0;
 		pr_info("kyle try to increase QC charge volt to 9V\n");
-		msleep(500);
-		__upm6910x_main_write_byte(upm, 0x0c, 0x8b);
+		msleep(500);                                        DP      DM
+		__upm6910x_main_write_byte(upm, 0x0c, 0x8b);        0V      0V
 		msleep(100);
-		__upm6910x_main_write_byte(upm, 0x0c, 0x95);
+		__upm6910x_main_write_byte(upm, 0x0c, 0x95);        0.6V    0.6V
 		msleep(100);
-		__upm6910x_main_write_byte(upm, 0x0c, 0x93);
+		__upm6910x_main_write_byte(upm, 0x0c, 0x93);        0.6V    0V
 		msleep(2000);
-		__upm6910x_main_write_byte(upm, 0x0c, 0x9d);
+		__upm6910x_main_write_byte(upm, 0x0c, 0x9d);        3.3V    0.6V
 	}
 }
 
+/*
+9. 为什么在dump前启用QC2.0？
+设计考虑：
+真实状态：确保看到充电器在实际工作状态下的寄存器值
+性能测试：在快速充电模式下测试寄存器配置
+协议验证：确认QC2.0握手过程正确配置了寄存器
+*/
 static int upm6910x_main_dump_register(struct charger_device *chg_dev)
 {
     struct upm6910x_main_device *upm = charger_get_data(chg_dev);
@@ -926,6 +938,13 @@ static int upm6910x_main_get_is_safetytimer_enable(struct charger_device *chg_de
         pr_info("[%s] read UPM6910_MAIN_CHRG_CTRL_5 fail\n", __func__);
         return ret;
     }
+    /*
+    4.2 !! 双重逻辑非操作
+    第一次 !：将任何非零值转换为 false（0），零值转换为 true（1）
+    第二次 !：再次取反，得到正确的布尔值
+
+    //*en = val & UPM6910_MAIN_SAFETY_TIMER_EN;  // 结果是0或0x08，不是bool
+    */
     *en = !!(val & UPM6910_MAIN_SAFETY_TIMER_EN);
     return 0;
 }
@@ -952,19 +971,20 @@ static int upm6910x_main_property_is_writeable(struct power_supply *psy,
             return false;
     }
 }
+
 static int upm6910x_main_charger_set_property(struct power_supply *psy,
                      enum power_supply_property prop,
                      const union power_supply_propval *val)
 {
-    int ret = -EINVAL;
-    struct upm6910x_main_device *upm = power_supply_get_drvdata(psy);
-    switch (prop) {
-        case POWER_SUPPLY_PROP_ONLINE:
+    int ret = -EINVAL;  // 默认返回"无效参数"错误
+    struct upm6910x_main_device *upm = power_supply_get_drvdata(psy);   //从电源对象中获取驱动特定的设备数据
+    switch (prop) { //下述属性在upm6910x_main_property_is_writeable函数中设置为可以写的
+        case POWER_SUPPLY_PROP_ONLINE:  //echo 1 > /sys/class/power_supply/upm6910-main-charger/online
             msleep(200);
             power_supply_changed(upm->charger);
             break;
-        case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
-            ret = upm6910x_main_set_input_curr_lim(s_chg_dev_otg, val->intval);
+        case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:  //echo 2000000 > /sys/class/power_supply/upm6910-main-charger/input_current_limit
+            ret = upm6910x_main_set_input_curr_lim(s_chg_dev_otg, val->intval); //s_chg_dev_otg = upm->chg_dev;
             break;
         default:
             return -EINVAL;
@@ -1107,19 +1127,19 @@ static void charge_detect_recheck_delay_work_func(struct work_struct *work)
                                         charge_detect_recheck_delay_work.work);
     struct upm6910x_main_state state;
 
-    if (!upm->state.vbus_attach) {
+    if (!upm->state.vbus_attach) {  //如果VBUS已断开，无需继续检测
         dev_err(upm->dev, "%s: vbus not good\n", __func__);
         return;
     }
 
-    Charger_Detect_Init();
+    Charger_Detect_Init();  //重新初始化检测：准备进行新一轮的检测
     upm->force_detect_count = 1;
     dev_err(upm->dev, "%s: force_detect_count: %d\n", __func__, upm->force_detect_count); 
 	msleep(50);
-    ret = upm6910x_main_force_dpdm(upm);
+    ret = upm6910x_main_force_dpdm(upm);    //这是核心函数，用于主动触发充电器类型的物理层检测
     msleep(300);
     if (ret) {
-        dev_err(upm->dev, "%s: force dpdm failed(%d)\n", __func__, ret);
+        dev_err(upm->dev, "%s: force dpdm failed(%d)\n", __func__, ret);    //如果 force_dpdm 返回错误，说明检测失败（如 I2C 通信异常、超时等
 
         return;
     }
@@ -1135,6 +1155,12 @@ static void charge_detect_recheck_delay_work_func(struct work_struct *work)
 
     return;
 }
+
+/*
+充电器检测工作队列函数，负责异步处理充电器的插入/拔出检测和类型识别
+充电器插入流程：VBUS连接 → 工作队列调度 → 检测状态变化 → 初始化检测 → 识别类型 → 更新状态 → 通知系统 → 寄存器调试
+充电器拔出流程：VBUS断开 → 工作队列调度 → 检测状态变化 → 释放资源 → 重置类型 → 更新状态 → 通知系统 → 寄存器调试
+*/
 static void charger_detect_work_func(struct work_struct *work)
 {
     struct delayed_work *charge_detect_delayed_work = NULL;
@@ -1144,33 +1170,34 @@ static void charger_detect_work_func(struct work_struct *work)
     bool vbus_attach_pre = false;
     bool online_pre = false;
     pr_notice("%s enter\r\n",__func__);
-    charge_detect_delayed_work =
-        container_of(work, struct delayed_work, work);
+    charge_detect_delayed_work = container_of(work, struct delayed_work, work);
     if (charge_detect_delayed_work == NULL) {
         pr_err("Cann't get charge_detect_delayed_work\n");
         return;
     }
-    upm = container_of(charge_detect_delayed_work, struct upm6910x_main_device,
-               charge_detect_delayed_work);
+    upm = container_of(charge_detect_delayed_work, struct upm6910x_main_device, charge_detect_delayed_work);    //目的：通过 work → delayed_work → upm
     if (upm == NULL) {
         pr_err("Cann't get upm6910x_main_device\n");
         return;
     }
-    vbus_attach_pre = upm->state.vbus_attach;
-    online_pre = upm->state.online;
+    vbus_attach_pre = upm->state.vbus_attach;   //上次 VBUS 是否存在，用于和当前状态对比，判断是否发生插入/拔出事件
+    online_pre = upm->state.online;             //上次vbus是否在线
+
     mutex_lock(&upm->lock);
-    memcpy(&state, &upm->state, sizeof(upm->state));
-    ret = upm6910x_main_get_state(upm, &state);
-    memcpy(&upm->state, &state, sizeof(state));
+    memcpy(&state, &upm->state, sizeof(upm->state));    // 拷贝状态
+    ret = upm6910x_main_get_state(upm, &state);     // 读取最新硬件状态
+    memcpy(&upm->state, &state, sizeof(state));     // 更新设备状态
     mutex_unlock(&upm->lock);
-    pr_err("%s v_pre = %d,v_now = %d\n", __func__,
-           vbus_attach_pre, state.vbus_attach);
+    pr_err("%s v_pre = %d,v_now = %d\n", __func__, vbus_attach_pre, state.vbus_attach);
+
     if (!vbus_attach_pre && state.vbus_attach) {
+        // 充电器插入   之前未连接 → 现在连接
         Charger_Detect_Init();
         pr_notice("adapter/usb inserted\n");
         upm->force_detect_count = 0;
         upm->chg_config = true;
     } else if (vbus_attach_pre && !state.vbus_attach) {
+        // 充电器拔出   之前连接 → 现在未连接
         Charger_Detect_Release();
         pr_notice("adapter/usb removed\n");
         upm->psy_type = POWER_SUPPLY_TYPE_UNKNOWN;
@@ -1301,6 +1328,9 @@ static int upm6910x_main_power_supply_init(struct upm6910x_main_device *upm,
     }
     return 0;
 }
+/*
+
+*/
 static int upm6910x_main_hw_init(struct upm6910x_main_device *upm)
 {
     struct power_supply_battery_info bat_info = {};
@@ -1311,6 +1341,13 @@ static int upm6910x_main_hw_init(struct upm6910x_main_device *upm)
     bat_info.charge_term_current_ua = UPM6910_MAIN_TERMCHRG_I_DEF_uA;
     upm->init_data.max_ichg = UPM6910_MAIN_ICHRG_I_MAX_uA;
     upm->init_data.max_vreg = UPM6910_MAIN_VREG_V_MAX_uV;
+    /*
+    禁用看门狗：参数0表示禁用
+    安全特性：看门狗用于防止充电器故障
+    看门狗（Watchdog Timer）用于在充电过程中检测软件死锁，超时会自动复位芯片。
+    在初始化阶段通常先关闭，避免在配置过程中被误触发。
+    后续在开始充电时再开启。
+    */
     upm6910x_main_set_watchdog_timer(upm, 0);
     ret = upm6910x_main_set_ichrg_curr(s_chg_dev_otg,
                       bat_info.constant_charge_current_max_ua);
@@ -1331,7 +1368,7 @@ static int upm6910x_main_hw_init(struct upm6910x_main_device *upm)
     if (ret) {
         goto err_out;
     }
-    ret = upm6910x_main_set_input_volt_lim(s_chg_dev_otg, upm->init_data.vlim);
+    ret = upm6910x_main_set_input_volt_lim(s_chg_dev_otg, upm->init_data.vlim); //upm->init_data.vlim 从设备树解析
     if (ret) {
         goto err_out;
     }
@@ -1339,7 +1376,7 @@ static int upm6910x_main_hw_init(struct upm6910x_main_device *upm)
     if (ret) {
         goto err_out;
     }
-    ret = upm6910x_main_set_vac_ovp(upm, VAC_OVP_14000); //14V
+    ret = upm6910x_main_set_vac_ovp(upm, VAC_OVP_14000); //14V  保护充电器：防止输入电压过高损坏
     if (ret) {
         goto err_out;
     }
@@ -1694,7 +1731,6 @@ static struct charger_ops upm6910x_main_chg_ops = {
     .enable_otg = upm6910x_main_enable_otg,
     .set_boost_current_limit = upm6910x_main_set_boost_current_limit,
 	
-	
 	.enable_hz = upm6910x_main_enable_hz,
     .enable_ship_mode = upm6910x_main_enable_ship,
 };
@@ -1922,7 +1958,7 @@ static int upm6910x_main_driver_probe(struct i2c_client *client,
     参数	                类型	                说明
     "primary_chg"	        const char *	        充电器设备名称
     &client->dev	        struct device *	        父设备指针
-    upm	                    void *	            驱动私有数据
+    upm	                    void *	            驱动私有数据,对应结构体struct charger_device { 中的void *driver_data， 这里的 upm 是作为“私有数据”（private driver data）传递给 charger_device_register 的，它的作用是让框架在后续调用操作函数时，能够反向找到驱动的上下文。
     &upm6910x_main_chg_ops	struct charger_ops *	充电器操作函数集
     &upm6910x_main_chg_props	struct charger_properties *	充电器属性
     如果注册失败，则返回错误码。
@@ -1987,6 +2023,16 @@ static int upm6910x_main_driver_probe(struct i2c_client *client,
     请求中断处理程序
     如果设备定义了中断线（IRQ）：
     使用线程化中断（devm_request_threaded_irq）处理复杂耗时操作。
+    参数	                            说明
+    dev	                                设备指针
+    client->irq	                        中断号
+    NULL	                            primary handler（为NULL表示使用线程化中断）
+    upm6910x_main_irq_handler_thread	中断线程处理函数
+    `IRQF_TRIGGER_FALLING IRQF_ONESHOT`	中断标志        
+            IRQF_TRIGGER_FALLING：下降沿触发：当信号从高电平变为低电平时触发中断  适合：低电平有效的中断信号     
+            IRQF_ONESHOT：  一次性中断：中断处理完成后需要重新启用中断           安全特性：防止中断嵌套和重复触发
+    dev_name(&client->dev)	            中断名称
+    upm	                                驱动私有数据
     中断触发方式为下降沿触发（插拔事件）。
     upm6910x_main_irq_handler_thread 是真正的中断服务函数。
     启用中断作为唤醒源（enable_irq_wake）。
@@ -1997,10 +2043,22 @@ static int upm6910x_main_driver_probe(struct i2c_client *client,
             dev, client->irq, NULL, upm6910x_main_irq_handler_thread,
             IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
             dev_name(&client->dev), upm);
-        if (ret) {
+        if (ret) {  //错误检查：如果中断注册失败，直接返回错误
             return ret;
         }
+        /*
+        启用中断唤醒
+        作用：
+            系统唤醒：允许中断将系统从睡眠状态唤醒
+            充电器应用：插入充电器时可以唤醒系统
+        */
         enable_irq_wake(client->irq);
+        /*
+        设备唤醒功能设置
+        作用：
+            标记设备：声明设备具有唤醒系统的能力
+            电源管理：允许系统在睡眠时保持相关电源域开启
+        */
         device_init_wakeup(upm->dev, true);
     }
     ret = upm6910x_main_vbus_regulator_register(upm);   //注册一个 regulator 子系统设备，用于控制 USB VBUS 输出（即手机作为主机给外设供电，OTG 功能）。
