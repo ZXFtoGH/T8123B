@@ -470,6 +470,7 @@ static int upm6910x_main_set_input_curr_lim(struct charger_device *chg_dev,
 static int upm6910x_main_usb_icl[] = {
     100, 500, 900, 1200, 1500, 1750, 2000, 3000,
 }; //根据充电器需求修改挡位
+
 int upm6910x_main_set_input_current_limit_aicl(struct charger_device *chg_dev,
                         int curr)
 {
@@ -1216,14 +1217,48 @@ static void charger_detect_work_func(struct work_struct *work)
     upm6910x_main_dump_register(upm->chg_dev);
     return;
 }
+/*
+irqreturn_t：中断处理函数返回类型，通常是 IRQ_HANDLED 或 IRQ_NONE。
+irq：触发中断的中断号（通常不用）。
+private：注册中断时传入的私有数据（即 upm 驱动上下文）。
+这段代码是 UPM6910 充电芯片的中断处理线程函数（threaded IRQ handler），它的作用是：在检测到充电相关硬件中断
+（如插入/拔出充电器）时，唤醒系统并调度一个延迟工作（work）来处理具体的充电状态检测逻辑。
+
+充电器插入 → UPM6910 芯片拉低 INT 引脚
+                 ↓
+         触发硬件中断
+                 ↓
+   upm6910x_main_irq_handler_thread 被调用
+                 ↓
+    __pm_wakeup_event() 保持系统唤醒
+                 ↓
+    打印日志：中断进入
+                 ↓
+ schedule_delayed_work(...) 调度工作
+                 ↓
+     返回 IRQ_HANDLED
+                 ↓
+      200ms 后执行 charger_detect_work_func()
+                 ↓
+      检测 VBUS、识别类型、上报系统
+*/
 static irqreturn_t upm6910x_main_irq_handler_thread(int irq, void *private)
 {
-    struct upm6910x_main_device *upm = private;
+    struct upm6910x_main_device *upm = private; //获取设备私有数据
+    /*
+    唤醒锁管理：
+        防止系统睡眠：在处理中断期间保持系统唤醒，唤醒的时间就是UPM6910_MAIN_IRQ_WAKE_TIME，在这个过程完成&upm->charge_detect_delayed_work对应的调度函数
+        超时保护：UPM6910_MAIN_IRQ_WAKE_TIME指定唤醒时间（如2000ms）
+        自动释放：超时后自动释放唤醒锁，无需手动释放
+    */
     __pm_wakeup_event(upm->charger_wakelock, UPM6910_MAIN_IRQ_WAKE_TIME);
     pr_notice("%s enter \r\n",__func__);
-    schedule_delayed_work(&upm->charge_detect_delayed_work,
-            msecs_to_jiffies(UPM6910_MAIN_WORK_DELAY_TIME));
-    return IRQ_HANDLED;
+    /*
+    这才是真正的“干活”部分。
+    调度一个延迟工作 charge_detect_delayed_work，在 UPM6910_MAIN_WORK_DELAY_TIME 毫秒后执行（例如 200ms）
+    */
+    schedule_delayed_work(&upm->charge_detect_delayed_work, msecs_to_jiffies(UPM6910_MAIN_WORK_DELAY_TIME));
+    return IRQ_HANDLED; //返回中断处理状态
 }
 static char *upm6910x_main_charger_supplied_to[] = {
     "battery",
@@ -1488,20 +1523,29 @@ static int upm6910x_main_parse_dt(struct upm6910x_main_device *upm)
     dev_err(upm->dev, "[%s] loaded\n", __func__);
     return 0;
 }
+
+//开启 VBUS 输出（OTG 开启）
 static int upm6910x_main_enable_vbus(struct regulator_dev *rdev)
 {
     struct upm6910x_main_device *upm = charger_get_data(s_chg_dev_otg);
     int ret = 0;
     pr_notice("%s ente\r\n", __func__);
-    /*we should ensure that the powerpath is enabled before enable OTG*/
+    /*we should ensure that the powerpath is enabled before enable OTG
+    退出 HIZ 模式：
+        HIZ（High Impedance）模式会断开输入路径，无法输出 VBUS。
+        必须先禁用 HIZ，才能开启 OTG。
+    */
     ret = upm6910x_main_disable_hiz_mode(upm);
     if (ret) {
         pr_err("%s exit hiz failed\r\n", __func__);
     }
+    /* 设置寄存器：开启 OTG 功能 */
     ret |= upm6910x_main_update_bits(upm, UPM6910_MAIN_CHRG_CTRL_1, UPM6910_MAIN_OTG_EN,
                    UPM6910_MAIN_OTG_EN);
     return ret;
 }
+
+//关闭 VBUS 输出（OTG 关闭）
 static int upm6910x_main_disable_vbus(struct regulator_dev *rdev)
 {
     struct upm6910x_main_device *upm = charger_get_data(s_chg_dev_otg);
@@ -1510,6 +1554,8 @@ static int upm6910x_main_disable_vbus(struct regulator_dev *rdev)
     ret = upm6910x_main_update_bits(upm, UPM6910_MAIN_CHRG_CTRL_1, UPM6910_MAIN_OTG_EN, 0);
     return ret;
 }
+
+//查询 VBUS 是否开启
 static int upm6910x_main_is_enabled_vbus(struct regulator_dev *rdev)
 {
     struct upm6910x_main_device *upm = charger_get_data(s_chg_dev_otg);
@@ -1517,8 +1563,16 @@ static int upm6910x_main_is_enabled_vbus(struct regulator_dev *rdev)
     int ret = 0;
     pr_notice("%s enter\n", __func__);
     ret = upm6910x_main_read_reg(upm, UPM6910_MAIN_CHRG_CTRL_1, &temp);
+    /* 返回 OTG_EN 位的状态 */
     return (temp & UPM6910_MAIN_OTG_EN) ? 1 : 0;
 }
+
+/*
+这是 charger class 驱动框架 调用的接口。
+当上层（如 Android 的 UsbManager）请求开启 OTG 时，会调用此函数。
+内部调用 enable_vbus 或 disable_vbus。
+🔄 相当于一个“适配层”，把 charger 框架的调用转接到 regulator 操作。
+*/
 static int upm6910x_main_enable_otg(struct charger_device *chg_dev, bool en)
 {
     int ret = 0;
@@ -1551,14 +1605,24 @@ static struct regulator_ops upm6910x_main_vbus_ops = {
     .is_enabled = upm6910x_main_is_enabled_vbus,
 };
 static const struct regulator_desc upm6910x_main_otg_rdesc = {
-    .of_match = "usb-otg-vbus",
-    .name = "usb-otg-vbus",
-    .ops = &upm6910x_main_vbus_ops,
-    .owner = THIS_MODULE,
-    .type = REGULATOR_VOLTAGE,
-    .fixed_uV = 5000000,
-    .n_voltages = 1,
+    .of_match = "usb-otg-vbus",      // 设备树匹配字符串
+    .name = "usb-otg-vbus",          // 注册后的调节器名称
+    .ops = &upm6910x_main_vbus_ops,  // 操作函数集
+    .owner = THIS_MODULE,            // 模块所有者
+    .type = REGULATOR_VOLTAGE,       // 调节器类型：电压调节器
+    .fixed_uV = 5000000,             // 固定输出电压：5V
+    .n_voltages = 1,                 // 只有1个电压等级
 };
+/*
+为 UPM6910 充电芯片注册一个“OTG 电源调节器（regulator）”设备，使得系统可以通过标准的 Linux Regulator Framework 
+来控制和管理 USB OTG（On-The-Go）功能，即让设备在作为“充电器”时（给其他设备供电）能够通过统一接口开启或关闭 VBUS 输出。
+
+什么是 OTG Regulator？
+在 USB OTG 场景中：
+    Device Mode（设备模式）：手机作为设备，从电脑或充电器取电（VBUS 输入）。
+    Host Mode（主机模式）：手机作为主机，给 U 盘、耳机等设备供电（VBUS 输出）。
+    这个 regulator 就是用来控制 Host Mode 下 VBUS 输出的开关。
+*/
 static int upm6910x_main_vbus_regulator_register(struct upm6910x_main_device *upm)
 {
     struct regulator_config config = {};
@@ -1566,8 +1630,19 @@ static int upm6910x_main_vbus_regulator_register(struct upm6910x_main_device *up
     /* otg regulator */
     config.dev = upm->dev;
     config.driver_data = upm;
-    upm->otg_rdev =
-        devm_regulator_register(upm->dev, &upm6910x_main_otg_rdesc, &config);
+    /*
+    这是核心步骤，使用 devm_regulator_register() 注册一个受设备资源管理的 regulator。
+    参数	                    含义
+    upm->dev	                设备指针
+    &upm6910x_main_otg_rdesc	regulator 描述符（descriptor），定义了这个 regulator 的名称、操作函数、电压/电流能力等
+    &config	                    上面初始化的配置结构体
+    */
+    upm->otg_rdev = devm_regulator_register(upm->dev, &upm6910x_main_otg_rdesc, &config);
+    /*
+    constraints 是 regulator 的约束条件，通常在 .desc 中通过 .constraints 字段定义。
+    REGULATOR_CHANGE_STATUS 表示该 regulator 支持 启用（enable）和禁用（disable） 操作。
+    这行代码确保可以通过 regulator_enable() 和 regulator_disable() 来控制 OTG 功能。
+    */
     upm->otg_rdev->constraints->valid_ops_mask |= REGULATOR_CHANGE_STATUS;
     if (IS_ERR(upm->otg_rdev)) {
         ret = PTR_ERR(upm->otg_rdev);
@@ -1739,19 +1814,28 @@ static ssize_t upm6910x_main_show_registers(struct device *dev, struct device_at
 			   char *buf)
 {
 	struct upm6910x_main_device *upm = dev_get_drvdata(dev);
-	u8 addr;
-	u8 val;
-	u8 tmpbuf[200];
-	int len;
-	int idx = 0;
-	int ret;
+	u8 addr;           // 寄存器地址
+    u8 val;            // 寄存器值
+    u8 tmpbuf[200];    // 临时缓冲区，用于格式化单行输出
+    int len;           // 每行字符串长度
+    int idx = 0;       // 当前已写入 buf 的总长度
+    int ret;           // 读取寄存器的返回值
 
+    /*
+    在缓冲区开头写入标题
+    PAGE_SIZE：通常4096字节，是sysfs的最大大小
+    */
 	idx = snprintf(buf, PAGE_SIZE, "%s:\n", "upm6910x_main Reg");
 	for (addr = 0x0; addr < UPM6910_MAIN_REG_NUM + 1; addr++) {
 		ret = upm6910x_main_read_reg(upm, addr, &val);
 		if (ret == 0) {
-			len = snprintf(tmpbuf, PAGE_SIZE - idx,
-					   "Reg[%.2x] = 0x%.2x\n", addr, val);
+            /*
+            将寄存器内容格式化为字符串，如：Reg[05] = 0x1A
+            拷贝到输出缓冲区 buf 中。
+            更新总长度 idx。
+            ⚠️ 注意：这里 PAGE_SIZE - idx 是为了防止缓冲区溢出。
+            */
+			len = snprintf(tmpbuf, PAGE_SIZE - idx, "Reg[%.2x] = 0x%.2x\n", addr, val);
 			memcpy(&buf[idx], tmpbuf, len);
 			idx += len;
 		}
@@ -1776,7 +1860,14 @@ static ssize_t upm6910x_main_store_registers(struct device *dev,
 
 	return count;
 }
-
+/*
+参数	        值	                            含义
+registers	    名称	                        创建的文件名
+S_IRUGO	        0444	                        所有用户可读
+S_IWUSR	        0200	                        仅所有者可写
+show	        upm6910x_main_show_registers	读取时调用
+store	        upm6910x_main_store_registers	写入时调用
+*/
 static DEVICE_ATTR(registers, S_IRUGO | S_IWUSR, upm6910x_main_show_registers,
 		   upm6910x_main_store_registers);
 
@@ -2020,23 +2111,30 @@ static int upm6910x_main_driver_probe(struct i2c_client *client,
     }
 
     /*
-    请求中断处理程序
+    下述代码作用：为 UPM6910 充电芯片的 硬件中断引脚（IRQ） 注册一个“线程化中断处理函数”，以便在发生充电事件（如插入/拔出、充电完成、故障等）时，能够及时响应并处理。
+    client->irq：来自 I2C 设备（struct i2c_client）的中断号。 如果平台没有连接中断引脚（例如某些简化设计），则跳过中断注册。
     如果设备定义了中断线（IRQ）：
     使用线程化中断（devm_request_threaded_irq）处理复杂耗时操作。
     参数	                            说明
     dev	                                设备指针
     client->irq	                        中断号
-    NULL	                            primary handler（为NULL表示使用线程化中断）
-    upm6910x_main_irq_handler_thread	中断线程处理函数
+    NULL	                            primary handler（为NULL表示使用线程化中断），上半部（top half） 处理函数（这里为空）
+    upm6910x_main_irq_handler_thread	中断线程处理函数，下半部（bottom half）线程函数
     `IRQF_TRIGGER_FALLING IRQF_ONESHOT`	中断标志        
             IRQF_TRIGGER_FALLING：下降沿触发：当信号从高电平变为低电平时触发中断  适合：低电平有效的中断信号     
             IRQF_ONESHOT：  一次性中断：中断处理完成后需要重新启用中断           安全特性：防止中断嵌套和重复触发
-    dev_name(&client->dev)	            中断名称
-    upm	                                驱动私有数据
+    dev_name(&client->dev)	            中断名称，（用于 /proc/interrupts 显示）
+    upm	                                传递给中断处理函数的私有数据（驱动上下文）
     中断触发方式为下降沿触发（插拔事件）。
     upm6910x_main_irq_handler_thread 是真正的中断服务函数。
     启用中断作为唤醒源（enable_irq_wake）。
     标记设备支持唤醒（device_init_wakeup）。
+
+    类比理解
+        想象充电芯片是一个“保安”：
+        当有“访客”（充电器插入）或“异常”（过压）时，他按一下按钮（拉低 INT 引脚）。
+        内核是“值班室”，按钮一按，就叫醒“值班员线程”（irq_handler_thread）。
+        值班员去查看监控（读寄存器），然后决定是否通知“管理员”（调度 work、上报电源子系统）。
     */
     if (client->irq) {
         ret = devm_request_threaded_irq(
@@ -2047,7 +2145,7 @@ static int upm6910x_main_driver_probe(struct i2c_client *client,
             return ret;
         }
         /*
-        启用中断唤醒
+        允许该中断 从系统睡眠（suspend）状态中唤醒系统
         作用：
             系统唤醒：允许中断将系统从睡眠状态唤醒
             充电器应用：插入充电器时可以唤醒系统
@@ -2058,6 +2156,9 @@ static int upm6910x_main_driver_probe(struct i2c_client *client,
         作用：
             标记设备：声明设备具有唤醒系统的能力
             电源管理：允许系统在睡眠时保持相关电源域开启
+
+        告诉内核：这个设备 支持作为唤醒源（wakeup source）。
+        配合 enable_irq_wake() 使用，确保在 pm_suspend() 期间该中断不会被禁用。
         */
         device_init_wakeup(upm->dev, true);
     }
@@ -2070,18 +2171,47 @@ static int upm6910x_main_driver_probe(struct i2c_client *client,
     upm6910x_main_detect_flag = 1;  //设置全局标志 upm6910x_main_detect_flag = 1，表明芯片已成功探测并初始化。
     return ret;
 }
+/*
+它的作用是：当 I2C 设备被移除（如模块卸载、热插拔设备断开）时，释放该驱动所占用的所有系统资源，防止内存泄漏和资源冲突。
+
+与 probe() 的对应关系
+probe() 中的操作	                            remove() 中的清理
+i2c_set_clientdata()	                        i2c_get_clientdata()
+devm_regulator_register() → upm->otg_rdev	    regulator_unregister(upm->otg_rdev)
+power_supply_register() → upm->charger	        power_supply_unregister(upm->charger)
+mutex_init(&upm->lock)	                        mutex_destroy(&upm->lock)
+mutex_init(&upm->i2c_rw_lock)	                mutex_destroy(&upm->i2c_rw_lock)
+
+注意：如果是使用 devm_ 系列资源管理函数（如 devm_request_threaded_irq），则无需在 remove 中显式释放，但 regulator 和 power_supply 没有 devm 版本，必须手动注销。
+
+重要注意事项
+顺序问题：
+    应先注销设备（regulator、power_supply），再销毁锁。
+    因为注销过程中可能还会用到锁。
+资源匹配：
+    所有在 probe() 中动态申请或注册的资源，都应在 remove() 中释放。
+避免竞态：
+    在注销 power_supply 后，应确保没有中断或 work 再尝试更新其状态
+
+
+问题	                            回答
+插拔充电器会调用 remove 函数吗？	❌ 不会
+remove 函数什么时候调用？	        I2C 设备被系统移除时（如模块卸载）
+插拔充电器由什么处理？	            中断（IRQ）+ 延迟工作（delayed_work）
+状态如何上报？	                   通过 power_supply_changed() 通知用户空间
+*/
 static int upm6910x_main_charger_remove(struct i2c_client *client)
 {
-    struct upm6910x_main_device *upm = i2c_get_clientdata(client);
+    struct upm6910x_main_device *upm = i2c_get_clientdata(client);  //这是释放资源的前提——必须先拿到“自己创建了哪些资源”。
     regulator_unregister(upm->otg_rdev);
-    power_supply_unregister(upm->charger);
-    mutex_destroy(&upm->lock);
+    power_supply_unregister(upm->charger);  //对应 probe() 中的 power_supply_register()
+    mutex_destroy(&upm->lock);  //对应 probe() 中的 mutex_init() 初始化
     mutex_destroy(&upm->i2c_rw_lock);
     return 0;
 }
 static void upm6910x_main_charger_shutdown(struct i2c_client *client)
 {
-    struct upm6910x_main_device *upm = i2c_get_clientdata(client);
+    struct upm6910x_main_device *upm = i2c_get_clientdata(client);  //从 I2C 客户端获取之前保存的驱动私有数据结构 upm
     int ret = 0;
     ret = upm6910x_main_disable_charger(upm);
     if (ret) {
