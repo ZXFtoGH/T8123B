@@ -1,3 +1,40 @@
+/*
+                     [pl_battery_init()]
+                              │
+                  ┌───────────┴───────────┐
+                  │ 已初始化？或无需初始化？│ → 退出
+                  └───────────┬───────────┘
+                              ▼
+                   [fuel_gauge_init()]
+                              │
+          ┌──────────────────┼──────────────────┐
+          ▼                  ▼                  ▼
+   设置 FGADC_RST_SRC    启用 SOFF_SLP_EN    读取 eFuse 校准值
+          │                  │                  │
+          └──────────────────┼──────────────────┘
+                             ▼
+                   读取当前时间 fg_curr_time
+                             │
+                   读取关机时间 shutdown_pmic_time
+                             │
+        ┌────────────────────┼────────────────────┐
+        ▼                    ▼                    ▼
+ fg_reset=0?     或    关机时间>30min?     → 需要 reset FGADC
+        │                    │                    │
+        └────────────────────┴────────────────────┘
+                             │
+                   执行 FGADC 软件复位 (CON1)
+                             │
+                记录 boot_vbat, shutdowntime
+                             │
+             记录 Preloader 充电状态 (RG_INFO_CON0)
+                             │
+                 打印日志，标记 is_fg_init=true
+                             │
+              ┌──────────────┴──────────────┐
+              ▼                             ▼
+   电池电压低？→ 执行补电        正常继续启动流程
+*/
 #include <typedefs.h>
 #include <platform.h>
 #include <pmic_wrap_init.h>

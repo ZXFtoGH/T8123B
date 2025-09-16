@@ -1,12 +1,23 @@
-#include <i2c.h>
-//#include <mt_drcc.h>
-#include <mtk_subpmic.h>
-#include <pal_log.h>
-#include <timer.h>
+/*
+该驱动主要完成以下任务：
+功能					 描述
+✅ 设备探测				检查是否连接了正确的 UPM6910D 芯片
+✅ 初始化设置			设置默认充电电流、看门狗、过压保护等
+✅ BC1.2 充电检测		判断插入的是哪种类型的充电器（SDP/CDP/DCP）
+✅ 参数配置				可设置输入限流、充电电压、看门狗时间等
+✅ 安全保障				支持软复位、关断充电、OVP 保护
+⚠️ 注意：这是运行在 Preloader 层的轻量级驱动，不是 Linux 内核中的完整 platform_driver。
+*/
+
+#include <i2c.h>               // 提供 i2c_write/read 函数
+//#include <mt_drcc.h>          // 注释掉，可能用于 DRAM 控制
+#include <mtk_subpmic.h>       // MTK 平台子 PMIC 相关接口
+#include <pal_log.h>           // 打印日志（Preloader Application Layer）
+#include <timer.h>             // 延时函数 mdelay()
 
 
 #define UPM6910D_SLAVE_ADDR	(0x6B)
-#define UPM6910D_PN			0x02
+#define UPM6910D_PN			0x02			//通过读取 REG_0B[6:3] 获取产品编号（Part Number），确认是 UPM6910D
 
 /* Register 00h */
 #define UPM6910X_REG_00      		0x00
@@ -320,17 +331,29 @@ static struct mt_i2c_t i2c = {
 	.speed = 400,
 };
 
+/*
+cmd：要读取的寄存器地址
+data：输出参数，用于保存读回来的数据
+返回值：成功为 I2C_OK，失败返回错误码
+*/
 static int upm6910d_i2c_read_byte(u8 cmd, u8 *data)
 {
 	int ret = 0;
 	u8 regval = cmd;
 
+	/*
+	&i2c: I2C控制器实例（包含I2C总线号、设备地址等信息）
+	&regval: 要写入的寄存器地址
+	第一个1: 写入的字节数（1字节，即寄存器地址）
+	第二个1: 要读取的字节数（1字节）
+	这是一个复合I2C操作：先写入寄存器地址，然后立即读取该地址的数据。
+*/
 	ret = i2c_write_read(&i2c, &regval, 1, 1);
 	if (ret != I2C_OK)
 		pal_log_err("%s reg0x%X fail(%d)\n", __func__, cmd, ret);
 	else {
 		pal_log_debug("%s reg0x%X = 0x%X\n", __func__, cmd, regval);
-		*data = regval;
+		*data = regval;	//将读取到的数据通过指针data返回给调用者
 	}
 
 	return ret;
@@ -360,8 +383,8 @@ static int upm6910d_i2c_update_bits(u8 cmd, u8 data, u8 mask)
 	if (ret != I2C_OK)
 		return ret;
 
-	regval &= ~mask;
-	regval |= (data & mask);
+	regval &= ~mask;			// 清除目标位
+	regval |= (data & mask);	//写入新值
 
 	return upm6910d_i2c_write_byte(cmd, regval);
 }
@@ -402,8 +425,8 @@ static void upm6910_main_set_chg_config(unsigned char val)
 
 static void upm6910_main_set_default_cur(void)
 {
-    upm6910_main_set_ichg(0x8);//500ma
-    upm6910_main_set_aicr(0x5);//500ma
+    upm6910_main_set_ichg(0x8);//480ma
+    upm6910_main_set_aicr(0x5);//300ma
 }
 
 static inline u8 upm6910d_closest_reg_via_tbl(const u32 *tbl, u32 tbl_size,
@@ -464,8 +487,7 @@ static int upm6910d_set_wdt(int sec)
 	if (sec <= 40 && sec > 0)
 		sec = 40;
 	
-	regval = upm6910d_closest_reg_via_tbl(upm6910d_wdt,
-				ARRAY_SIZE(upm6910d_wdt), sec);
+	regval = upm6910d_closest_reg_via_tbl(upm6910d_wdt, ARRAY_SIZE(upm6910d_wdt), sec);
 
 	pal_log_info("%s time = %d(0x%X)\n", __func__, sec, regval);
 
@@ -547,7 +569,7 @@ static int mtk_ext_chgdet_pre_init(void)
 
 	Charger_Detect_Init();
 
-	/* Toggle chgdet flow */
+	/* Toggle chgdet flow  通过 先关后开 的方式，可以确保触发一次全新的、完整的 BC1.2 检测流程。 */
 	ret = upm6910_enable_bc12(false);
 	if (ret != I2C_OK)
 		goto out;
@@ -644,6 +666,15 @@ out:
 	return ret;
 }
 
+/*
+完成以下关键初始化步骤：
+检测 UPM6910D 芯片是否存在
+软复位芯片（恢复默认状态）
+关闭或设置看门狗（WDT）
+设置输入过压保护（OVP）阈值
+初始化 BC1.2 充电检测（可选）
+⚠️ 这个函数通常在 操作系统启动前（Preloader 或 BootROM 阶段）调用，确保设备插上电源就能开始安全充电。
+*/
 int upm6910d_probe(void)
 {
 	int ret = 0;
@@ -657,14 +688,23 @@ int upm6910d_probe(void)
 		return ret;
 	}
 
+	/*
+	设置一个全局标志位，表示“充电检测预初始化已完成”。
+	*/
 	chgdet_pre_inited = 1;
 
-	ret = upm6910d_reset_device();
+	ret = upm6910d_reset_device();	//重置UPM6910D芯片到默认状态,软复位会让芯片所有寄存器恢复到默认值，确保处于已知状态
 	if (ret != I2C_OK) {
 		pal_log_err("%s detect reset fail(%d)\n", __func__, ret);
 		goto out;
 	}
 
+	/*
+	设置看门狗定时器为0，即禁用看门狗功能
+	防止芯片在预引导阶段因超时而复位
+	看门狗的作用是：如果系统长时间不“喂狗”，芯片会自动重启系统。
+	在 Preloader 阶段通常不需要 WDT，所以先关掉。
+	*/
 	ret = upm6910d_set_wdt(0);
 	if (ret != I2C_OK) {
 		pal_log_err("%s set wdt fail(%d)\n", __func__, ret);

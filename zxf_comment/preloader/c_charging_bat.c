@@ -1,3 +1,67 @@
+/*
+整体结构概览
+功能	                   对应函数/变量
+充电器类型检测	            hw_charger_type_detection() / mt_charger_type_detection()
+外部 PMIC 检测支持	        mtk_ext_chgdet()（通过 MTK_EXT_CHGDET_SUPPORT 宏控制）
+电池电压检测	            get_bat_sense_volt()
+充电电压检测	            get_charger_volt()
+启动充电	                pchr_turn_on_charging()
+看门狗喂狗	                kick_charger_wdt()
+电池保护检查	            pl_check_bat_protect_status()
+
+函数调用关系图：
+                          ┌──────────────────────┐
+                          │   mt_charger_type_detection()   ← 入口
+                          └──────────────────────┘
+                                      │
+                                      ▼
+                   ┌────────────────────────────────────┐
+                   │ 是否首次检测？ (g_first_check == 0) │
+                   └────────────────────────────────────┘
+                                      │
+                                      ├─ 否 → 直接返回 g_ret
+                                      │
+                                      ▼ 是
+                   ┌────────────────────────────────────┐
+                   │ 是否检测到充电器？ upmu_is_chr_det() │
+                   └────────────────────────────────────┘
+                                      │
+                                      ├─ 否 → 返回 CHARGER_UNKNOWN
+                                      │
+                                      ▼ 是
+              ┌──────────────────────────────────────────────────┐
+              │ 是否定义 MTK_EXT_CHGDET_SUPPORT？                 │
+              └──────────────────────────────────────────────────┘
+                         │                      │
+             是 ↓                        否 ↓
+     ┌─────────────────┐        ┌──────────────────────────────┐
+     │ mtk_ext_chgdet() │        │ hw_charger_type_detection() │
+     └─────────────────┘        └──────────────────────────────┘
+           │                                 │
+           │                                 ├─ hw_bc11_init()
+           │                                 ├─ hw_bc11_DCD()
+           │                                 ├─ hw_bc11_stepA1()
+           │                                 ├─ hw_bc11_stepA2()
+           │                                 ├─ hw_bc11_stepB2()
+           │                                 └─ hw_bc11_done()
+           │                                 └─ 结果 → g_ret
+           │
+           ▼
+     [结果保存到 g_ret]
+
+           ▼
+┌──────────────────────────────┐
+│ pl_check_bat_protect_status() │
+└──────────────────────────────┘
+           │
+           ├─ get_bat_sense_volt()
+           ├─ get_charger_volt()
+           ├─ get_charging_current()
+           └─ pchr_turn_on_charging()
+
+           ▼
+   kick_charger_wdt() ← 喂狗
+*/
 #include <typedefs.h>
 #include <platform.h>
 #include <pmic_wrap_init.h>
@@ -59,14 +123,13 @@ CHARGER_TYPE g_ret = CHARGER_UNKNOWN;
 int g_charger_in_flag = 0;
 int g_first_check = 0;
 static int vbat_status = PMIC_VBAT_NOT_DROP;
-#ifdef PMIC_FORCE_CHARGER_TYPE
 
+#ifdef PMIC_FORCE_CHARGER_TYPE
 int hw_charger_type_detection(void)
 {
     pal_log_info("force STANDARD_HOST\r\n");
     return STANDARD_HOST;
 }
-
 #else
 
 extern void Charger_Detect_Init(void);
@@ -91,7 +154,7 @@ static void hw_bc11_dump_register(void)
 static void hw_bc11_init(void)
 {
     mdelay(200);
-    Charger_Detect_Init();
+    Charger_Detect_Init();      // 充电检测通用初始化
 #if TBD
     //RG_bc11_BIAS_EN=1
     pmic_config_interface(PMIC_RG_BC11_BIAS_EN_ADDR, 1, PMIC_RG_BC11_BIAS_EN_MASK, PMIC_RG_BC11_BIAS_EN_SHIFT);
@@ -279,14 +342,54 @@ void hw_set_cc(int cc_val)
     //TBD
 }
 
+/*
+MTK 平台中用于检测 USB 充电器类型的底层硬件函数，它实现了 USB BC1.2（Battery Charging v1.2）协议 的检测流程，通过一系列电压和电阻的测量来判断插入的是哪种类型的充电设备。
+检测流程（经典四步法）
+步骤	操作	判断结果
+hw_bc11_init()	初始化 PMIC 的 BC1.2 模块	准备开始检测
+hw_bc11_DCD()	做 Data Contact Detect (DCD)：检测 D+ D- 是否接触良好	若失败 → 可能是浮空或坏线
+hw_bc11_stepA1()	测试 D- 上拉、D+ 下拉	若导通 → 可能是 Apple 充电器
+hw_bc11_stepA2()	D+ 上拉，测 D- 电压	若导通 → 进入 B2
+hw_bc11_stepB2()	D- 上拉，测 D+ 电压	若导通 → DCP（快充头）<br>否则 → Charging Host（支持充电的电脑口）
+默认	都不导通 → SDP（标准 USB 口）	
+
+BC1.1检测步骤详解
+hw_bc11_DCD() - 数据接触检测
+    在D+和D-上施加测试电流
+    检测数据线是否短路
+    判断是否为专用充电端口
+
+hw_bc11_stepA1() - 苹果充电器检测
+    检测特定的电压特性
+    识别苹果2.1A充电器的特殊特征
+
+hw_bc11_stepA2() - USB数据线检测
+    检测D+和D-线上的电压
+    判断USB主机类型
+
+hw_bc11_stepB2() - 充电器/主机区分
+    进一步检测电流输出能力
+    区分标准充电器和充电USB主机
+*/
 int hw_charger_type_detection(void)
 {
     CHARGER_TYPE charger_tye = CHARGER_UNKNOWN;
 
-    /********* Step initial  ***************/
+    /********* Step initial  **************
+     * 配置PMIC相关寄存器  设置BC1.1检测所需的偏置电压和比较器
+    */
     hw_bc11_init();
 
-    /********* Step DCD ***************/
+    /********* Step DCD **************
+     * DCD功能：检测数据线是否短路，判断是否为专用充电端口（DCP）
+     * 原理：
+            给 D+ 施加一个微小电流（IDP_SRC）。
+            测量 D+ 上的电压。
+            如果电压上升明显 → 说明 D+ 是开路的（没接好）→ 返回 0（失败）。
+            如果电压变化小 → 说明 D+ 接地了（正常连接）→ 返回 1（成功）。
+        返回1：数据线短路，可能是专用充电器
+        返回0：数据线未短路，可能是标准USB主机
+    */
     if(1 == hw_bc11_DCD())
     {
          /********* Step A1 ***************/
@@ -325,24 +428,40 @@ int hw_charger_type_detection(void)
          }
     }
 
-    /********* Finally setting *******************************/
+    /********* Finally setting ******************************
+     * 关闭BC1.1相关电路
+        释放资源，恢复默认状态
+    */
     hw_bc11_done();
 
     return charger_tye;
 }
 #endif
 
+/*
+本驱动文件的入口
+为什么它是入口？
+它是唯一返回 CHARGER_TYPE 的公共函数。
+其他模块（如 Bootloader 的电源初始化、Kernel 的 charger manager）会调用它来获取当前充电器类型。
+它封装了内部检测逻辑，对外提供统一接口。
+
+这个函数的作用是：在系统启动时，安全、准确地识别当前插入的充电器类型，只检测一次，并把结果缓存起来供后续使用，为正常充电打下基础。
+*/
 CHARGER_TYPE mt_charger_type_detection(void)
 {
     if( g_first_check == 0 )
     {
         g_first_check = 1;
 
+        /*
+        upmu_is_chr_det(): 检测物理上是否有充电器插入
+        如果没有检测到充电器，直接返回 CHARGER_UNKNOWN
+        */
         if(upmu_is_chr_det() == KAL_FALSE)
             return CHARGER_UNKNOWN;
 
 #ifdef MTK_EXT_CHGDET_SUPPORT
-        mtk_ext_chgdet(&g_ret);
+        mtk_ext_chgdet(&g_ret); //如果定义了 MTK_EXT_CHGDET_SUPPORT，说明使用外部充电检测芯片（如：UPM6910、BQ24196 等）来进行更精确的充电器识别。
 #ifdef MULTI_EXT_MAIN_CHARGER
         pal_log_info("first chg get g_ret = %d\n",g_ret);
         if(!g_ret){
@@ -513,12 +632,65 @@ int get_charging_current(int times)
 	return ICharging;
 }
 
+/*
+调用时机：通常在 mt_charger_type_detection() 成功识别出充电器类型后调用。
+目标场景：设备电池电量极低（甚至关机）时插入充电器，需要“先充一点电才能开机”。
+核心任务：
+检测当前电池电压是否太低（< 阈值）
+如果太低，就主动开启充电
+监控充电电流和电压是否正常
+如果充电异常（如电压过高、电流过小），则停止充电并保护系统
+等待电池电压回升到安全水平后再继续启动流程
 
+                     [pl_check_bat_protect_status()]
+                                      │
+                      ┌───────────────┴───────────────┐
+                      │   读取电池电压 bat_val         │
+                      └───────────────┬───────────────┘
+                                      ▼
+                ┌──────────────────────────────────────┐
+                │ bat_val < BATTERY_LOWVOL_THRESOLD ? │
+                └────────────────────┬─────────────────┘
+                                     │
+                   否 ┌─────────────┴──────────────┐ 是
+                      ▼                            ▼
+             [结束，准备启动系统]     [进入充电保护循环]
+                                              │
+                        ┌─────────────────────┼─────────────────────┐
+                        ▼                     ▼                     ▼
+               [喂看门狗]      [是否有充电器？否→退出]   [VBUS电压过高？是→退出]
+                                              │
+                                    [开启充电 pchr_turn_on_charging(TRUE)]
+                                              │
+                              ┌───────────────┴───────────────┐
+                              │       连续10次检测电流/电压     │
+                              └───────────────┬───────────────┘
+                                              │
+                               多次电流<100mA?┌┴┐ 是
+                                          ↓   │ │ 否
+                                   [cnt >= 8?] │
+                                          │   ↓
+                                      是  ▼   [cnt=0, 继续]
+                                    [关闭充电，退出]
+                                          │
+                                          ▼
+                                 [延时50ms，更新bat_val]
+                                          │
+                                          └─────┐
+                                                │
+                                                ▼
+                                       [回到 while 判断]
+
+*/
 void pl_check_bat_protect_status(void)
 {
     kal_int32 bat_val = 0;
 	int current,chr_volt,cnt=0,i;
 
+    /*
+    根据充电路径选择不同的电压检测函数
+    参数5表示测量5次取平均值
+    */
 #if SWCHR_POWER_PATH
     bat_val = get_i_sense_volt(5);
 #else
@@ -537,6 +709,11 @@ void pl_check_bat_protect_status(void)
 
     while (bat_val < BATTERY_LOWVOL_THRESOLD)
     {
+        /*
+        喂看门狗（防止死机）
+        在长时间操作中必须定期喂狗，否则硬件看门狗会触发复位。
+        因为此循环可能持续几秒甚至十几秒，所以每次循环都重启看门狗。
+        */
         mtk_wdt_restart();
         if(upmu_is_chr_det() == KAL_FALSE)
         {
@@ -555,6 +732,10 @@ void pl_check_bat_protect_status(void)
         pchr_turn_on_charging(KAL_TRUE);
 
 
+        /*
+        监测充电电流和电压10次
+    如果电流<100mA且电压<4400mV，认为是异常状态
+        */
 		cnt=0;
 		for(i=0;i<10;i++)
 		{
@@ -572,6 +753,10 @@ void pl_check_bat_protect_status(void)
 			}
 		}
 
+        /*
+        如果10次检测中有8次异常，判定为充电故障
+        关闭充电功能并退出循环
+        */
 		if(cnt>=8)
 		{
 
