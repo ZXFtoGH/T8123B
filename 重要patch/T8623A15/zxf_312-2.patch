@@ -1,0 +1,35 @@
+diff --git a/build/make/target/product/default_art_config.mk b/build/make/target/product/default_art_config.mk
+index 61d7235aaca..1a3f2cf0e8e 100644
+--- a/build/make/target/product/default_art_config.mk
++++ b/build/make/target/product/default_art_config.mk
+@@ -76,7 +76,6 @@ PRODUCT_APEX_BOOT_JARS := \
+     com.android.mediaprovider:framework-mediaprovider \
+     com.android.mediaprovider:framework-pdf \
+     com.android.mediaprovider:framework-pdf-v \
+-    com.android.mediaprovider:framework-photopicker \
+     com.android.ondevicepersonalization:framework-ondevicepersonalization \
+     com.android.os.statsd:framework-statsd \
+     com.android.permission:framework-permission \
+diff --git a/device/emdoor/common/device-mssi.mk b/device/emdoor/common/device-mssi.mk
+index b090d9af45f..138745cc937 100755
+--- a/device/emdoor/common/device-mssi.mk
++++ b/device/emdoor/common/device-mssi.mk
+@@ -10,7 +10,7 @@ endif
+ endif
+ 
+ #add by dengzirong
+-ifeq ($(strip $(BUILD_GMS)), yes)
++ifneq ($(strip $(BUILD_GMS)), yes)
+ 
+ GMS_DIR=vendor/partner_gms
+ MAINLINE_DIR=vendor/partner_modules
+diff --git a/device/mediatek/system/mssi_64_cn_t8623_l40mmeim_T105_64_k66/SystemConfig.mk b/device/mediatek/system/mssi_64_cn_t8623_l40mmeim_T105_64_k66/SystemConfig.mk
+index e2a3221ff7a..8cbc3209a7f 100644
+--- a/device/mediatek/system/mssi_64_cn_t8623_l40mmeim_T105_64_k66/SystemConfig.mk
++++ b/device/mediatek/system/mssi_64_cn_t8623_l40mmeim_T105_64_k66/SystemConfig.mk
+@@ -97,4 +97,4 @@ MSSI_MTK_SPM_DVR_SUPPORT = no
+ BOOT_LOGO = wuxganl
+ BUILD_GMS = yes
+ EM_GMS_BRANCH = GMSExpress-V0-202411
+-EM_MAINLINE_BRANCH = mainline_v_2024_nov_12717143
++EM_MAINLINE_BRANCH = mainline_v_2024_oct_12508532

@@ -1,0 +1,16 @@
+diff --git a/vendor/mediatek/proprietary/bootable/bootloader/lk/platform/mt6771/platform.c b/vendor/mediatek/proprietary/bootable/bootloader/lk/platform/mt6771/platform.c
+index f337c7b1f4e..86fbffbb576 100644
+--- a/vendor/mediatek/proprietary/bootable/bootloader/lk/platform/mt6771/platform.c
++++ b/vendor/mediatek/proprietary/bootable/bootloader/lk/platform/mt6771/platform.c
+@@ -904,6 +904,11 @@ void platform_init(void)
+ 	}
+ #endif
+ 
++while(1)
++	{
++		udelay(1000000);
++		mtk_wdt_disable();
++	}
+ 
+ #ifndef MACH_FPGA
+ 	PROFILING_START("sw_env");

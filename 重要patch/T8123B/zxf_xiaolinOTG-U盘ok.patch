@@ -1,0 +1,103 @@
+diff --git a/kernel-5.10/drivers/misc/mediatek/extcon/extcon-mtk-usb.c b/kernel-5.10/drivers/misc/mediatek/extcon/extcon-mtk-usb.c
+index b9b7b552dca..d267eed9cfa 100644
+--- a/kernel-5.10/drivers/misc/mediatek/extcon/extcon-mtk-usb.c
++++ b/kernel-5.10/drivers/misc/mediatek/extcon/extcon-mtk-usb.c
+@@ -19,13 +19,19 @@
+ #include <linux/usb/role.h>
+ #include <linux/workqueue.h>
+ #include <linux/proc_fs.h>
++#include <linux/usb.h>
++#include <linux/notifier.h>
+ 
+ #include "extcon-mtk-usb.h"
+ 
+ #if IS_ENABLED(CONFIG_TCPC_CLASS)
+ #include "tcpm.h"
+ #endif
++#if IS_ENABLED(CONFIG_LEDS_MTK)
++#include <linux/leds-mtk.h>
++#endif
+ 
++static int total_usb_cnt = 0; 
+ static const unsigned int usb_extcon_cable[] = {
+ 	EXTCON_USB,
+ 	EXTCON_USB_HOST,
+@@ -542,6 +548,63 @@ static int mtk_usb_extcon_procfs_init(struct mtk_extcon_info *extcon)
+ }
+ #endif
+ 
++static int usb_notify_callback(struct notifier_block *nb, unsigned long action, void *data)
++{
++    struct usb_device *udev = data;
++
++    switch (action) {
++    case USB_DEVICE_ADD:
++	    total_usb_cnt++;
++       // pr_info("11111-0 USB device added: %s  %d\n", dev_name(&udev->dev), total_usb_cnt);
++        break;
++    case USB_DEVICE_REMOVE:
++	    total_usb_cnt--;
++       // pr_info("11111-1 USB device removed: %s %d\n", dev_name(&udev->dev), total_usb_cnt);
++        break;
++    default:
++        break;
++    }
++
++    return NOTIFY_OK;
++}
++
++
++static struct notifier_block usb_notifier = {
++    .notifier_call = usb_notify_callback,
++};
++
++#if IS_ENABLED(CONFIG_LEDS_MTK)
++int led_backlight_changed_event(struct notifier_block *nb, unsigned long event, void *v)
++{
++	struct led_conf_info *led_conf;
++    static int pre_brightness = 102; 
++	led_conf = (struct led_conf_info *)v;
++
++	switch (event) {
++	case LED_BRIGHTNESS_CHANGED:
++		if(pre_brightness == 0 && g_extcon->c_role == USB_ROLE_HOST){
++			if(total_usb_cnt < 1){
++				mtk_usb_extcon_set_vbus(g_extcon, false);
++				mdelay(50);
++				mtk_usb_extcon_set_vbus(g_extcon, true);
++				mdelay(50);
++			}		 
++		}
++		//printk("1111 %s, %d  g_extcon->c_role = %d\n",__func__, __LINE__,g_extcon->c_role);
++		pre_brightness = led_conf->cdev.brightness;
++		break;
++	default:
++		break;
++	}
++	return NOTIFY_DONE;
++}
++
++static struct notifier_block usb_init_notifier = {
++	.notifier_call = led_backlight_changed_event,
++};
++#endif
++
++
+ static int mtk_usb_extcon_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+@@ -644,6 +707,14 @@ static int mtk_usb_extcon_probe(struct platform_device *pdev)
+ #endif
+ 
+ 	platform_set_drvdata(pdev, extcon);
++    g_extcon = extcon;
++
++#if IS_ENABLED(CONFIG_LEDS_MTK)
++		dev_err(dev,"colin test led for usb\n");
++	
++		mtk_leds_register_notifier(&usb_init_notifier);
++#endif
++       usb_register_notify(&usb_notifier);
+ 
+ 	return 0;
+ }

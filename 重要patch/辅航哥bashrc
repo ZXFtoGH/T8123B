@@ -1,0 +1,218 @@
+# ~/.bashrc: executed by bash(1) for non-login shells.
+# see /usr/share/doc/bash/examples/startup-files (in the package bash-doc)
+# for examples
+
+# If not running interactively, don't do anything
+case $- in
+    *i*) ;;
+      *) return;;
+esac
+
+# don't put duplicate lines or lines starting with space in the history.
+# See bash(1) for more options
+HISTCONTROL=ignoreboth
+
+# append to the history file, don't overwrite it
+shopt -s histappend
+
+# for setting history length see HISTSIZE and HISTFILESIZE in bash(1)
+HISTSIZE=1000
+HISTFILESIZE=2000
+
+# check the window size after each command and, if necessary,
+# update the values of LINES and COLUMNS.
+shopt -s checkwinsize
+
+# If set, the pattern "**" used in a pathname expansion context will
+# match all files and zero or more directories and subdirectories.
+#shopt -s globstar
+
+# make less more friendly for non-text input files, see lesspipe(1)
+[ -x /usr/bin/lesspipe ] && eval "$(SHELL=/bin/sh lesspipe)"
+
+# set variable identifying the chroot you work in (used in the prompt below)
+if [ -z "${debian_chroot:-}" ] && [ -r /etc/debian_chroot ]; then
+    debian_chroot=$(cat /etc/debian_chroot)
+fi
+
+# set a fancy prompt (non-color, unless we know we "want" color)
+case "$TERM" in
+    xterm-color|*-256color) color_prompt=yes;;
+esac
+
+# uncomment for a colored prompt, if the terminal has the capability; turned
+# off by default to not distract the user: the focus in a terminal window
+# should be on the output of commands, not on the prompt
+#force_color_prompt=yes
+
+if [ -n "$force_color_prompt" ]; then
+    if [ -x /usr/bin/tput ] && tput setaf 1 >&/dev/null; then
+	# We have color support; assume it's compliant with Ecma-48
+	# (ISO/IEC-6429). (Lack of such support is extremely rare, and such
+	# a case would tend to support setf rather than setaf.)
+	color_prompt=yes
+    else
+	color_prompt=
+    fi
+fi
+
+if [ "$color_prompt" = yes ]; then
+    PS1='${debian_chroot:+($debian_chroot)}\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
+else
+    PS1='${debian_chroot:+($debian_chroot)}\u@\h:\w\$ '
+fi
+unset color_prompt force_color_prompt
+
+# If this is an xterm set the title to user@host:dir
+case "$TERM" in
+xterm*|rxvt*)
+    PS1="\[\e]0;${debian_chroot:+($debian_chroot)}\u@\h: \w\a\]$PS1"
+    ;;
+*)
+    ;;
+esac
+
+# enable color support of ls and also add handy aliases
+if [ -x /usr/bin/dircolors ]; then
+    test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
+    alias ls='ls --color=auto'
+    #alias dir='dir --color=auto'
+    #alias vdir='vdir --color=auto'
+
+    alias grep='grep --color=auto'
+    alias fgrep='fgrep --color=auto'
+    alias egrep='egrep --color=auto'
+fi
+
+# colored GCC warnings and errors
+#export GCC_COLORS='error=01;31:warning=01;35:note=01;36:caret=01;32:locus=01:quote=01'
+
+# some more ls aliases
+alias ll='ls -alF'
+alias la='ls -A'
+alias l='ls -CF'
+
+alias gd='git diff'
+alias gs='git status'
+alias gdc='git diff --cached'
+alias gdb='git diff --binary'
+alias gb='git branch'
+alias glo='git log --oneline'
+alias gl='git log'
+alias 107012="cd /home/a32sw02/kyle_work/s_1070"
+alias 107013="cd /home/a32sw02/kyle_work/t_1070"
+alias gm='git mergetool'
+alias gcd='git clean -df'
+alias diffpack='./build/tools/releasetools/ota_from_target_files -i'
+alias fn='find -name'
+alias repomt='repo manifest -r -o ./xmlpub/$(date +%Y%m%d-%H%M%S).xml'
+alias gcp='git cherry-pick'
+alias gcpc='git cherry-pick --continue'
+alias cd2="cd ../.."
+alias cd3="cd ../../.."
+alias cd4="cd ../../../.."
+alias cd5="cd ../../../../.."
+alias cd6="cd ../../../../../.."
+alias cd7="cd ../../../../../../.."
+alias cd8="cd ../../../../../../../.."
+alias lk="cd vendor/mediatek/proprietary/bootable/bootloader/lk/"
+alias lk2="cd vendor/mediatek/proprietary/bootable/bootloader/lk2/"
+alias pl="cd vendor/mediatek/proprietary/bootable/bootloader/preloader/"
+alias dev="cd device/mediateksample/tb8788p1_64_bsp/"
+alias mk="make 2>&1 |tee log;date"
+alias mkota="make otapackage 2>&1 |tee log;date"
+alias mkb="make bootimage 2>&1 |tee log;date"
+alias mimk="make installclean && make 2>&1 |tee log;date"
+alias 88source="source build/envsetup.sh && lunch full_tb8788p1_64_bsp-userdebug"
+alias k88source="source build/envsetup.sh && lunch full_tb8788p1_64_bsp_k419-userdebug"
+alias u88source="source build/envsetup.sh && lunch full_tb8788p1_64_bsp-user"
+alias 66source="source build/envsetup.sh && lunch full_tb8766p1_64_bsp-userdebug"
+alias 68source="source build/envsetup.sh && lunch full_tb8768p1_64_bsp-userdebug"
+alias 97source="source build/envsetup.sh && lunch full_tb8797p2_64_k419_wifi-userdebug"
+alias vs="code"
+alias cds="cd /mnt/nv2T/"
+alias 1061="cd /mnt/nv2T/1061"
+alias gr="grep -rn "
+alias rs="rsync -avz"
+alias repom="repo manifest -r -o txt.xml"
+alias 12repom="repo manifest -r -o 12txt.xml"
+alias 13repom="repo manifest -r -o 13txt.xml"
+alias ldiff="ls -lth *.diff"
+alias cdo1="cd /mnt/ssd2/owner1/mtk"
+alias 1070="cd /home/a32sw02/workE/8781/"
+alias repos="repo status > repostatus.txt"
+alias gpgc="git pull;git commit -a"
+alias rkmk="source build/envsetup.sh ;lunch rk3568_s-userdebug;./build.sh -AUCKu 2>&1 |tee log;date"
+alias rkmkb="source build/envsetup.sh ;lunch rk3568_s-userdebug;./build.sh -K 2>&1|tee log;date"
+alias 8631mk="source build/envsetup.sh ;lunch full_t8631_l40mmeim_T8_64_k510-userdebug;make 2>&1 |tee log;date"
+alias mk8123="python vendor/mediatek/proprietary/scripts/releasetools/split_build_helper.py --run full_t8123b_l40mmeim_T1095_64-userdebug --target  | tee log;date"
+alias mk8123boot="source build/envsetup.sh && export OUT_DIR=out_krn && lunch krn_mgk_t8123b_l40mmeim_T1095_64-userdebug && make krn_images && source build/envsetup.sh && export OUT_DIR=out && lunch vext_t8123b_l40mmeim_T1095_64-userdebug && make vext_images && python out_sys/target/product/mssi_t_t8123b_l40mmeim_T1095_64/images/split_build.py --system-dir out_sys/target/product/mssi_t_t8123b_l40mmeim_T1095_64/images --vendor-dir out_hal/target/product/mgvi_t_t8123b_l40mmeim_T1095_64/images --kernel-dir out_krn/target/product/mgk_t8123b_l40mmeim_T1095_64/images --vext-dir out/target/product/t8123b_l40mmeim_T1095_64/images --output-dir out/target/product/t8123b_l40mmeim_T1095_64/merged  | tee log;date"
+#source /bin/emdoor.sh
+alias mkt3="python vendor/mediatek/proprietary/scripts/releasetools/split_build_helper.py --run full_tb8786p1_64_k510-userdebug --target | tee log;date"
+alias mkt3u="python vendor/mediatek/proprietary/scripts/releasetools/split_build_helper.py --run full_tb8786p1_64_k510-user --target | tee log;date"
+alias mk8623="vendor/mediatek/proprietary/scripts/releasetools/split_build_helper.py --run full_t8623_l40mmeim_T105_64_k66-userdebug --target -j16  | tee log;date"
+alias mk8623boot="source build/envsetup.sh && export OUT_DIR=out && lunch vnd_t8623_l40mmeim_T105_64_k66-next-userdebug && make vnd_images krn_images&&python out_sys/target/product/mssi_64_cn_t8623_l40mmeim_T105_64_k66/images/split_build.py --system-dir out_sys/target/product/mssi_64_cn_t8623_l40mmeim_T105_64_k66/images --vendor-dir out/target/product/t8623_l40mmeim_T105_64_k66/images --kernel-dir out/target/product/t8623_l40mmeim_T105_64_k66/images --output-dir out/target/product/t8623_l40mmeim_T105_64_k66/merged | tee log;date"
+alias mk7330="source build/envsetup.sh && lunch a733_pro3_arm64-ap3a-userdebug && make -j16 -m ./../a733-android15-grf-vendor | tee log && date"
+alias mk7330b="source build/envsetup.sh && lunch a733_pro3_arm64-ap3a-userdebug && make -j16 -m ./../a733-android15-grf-vendor --skip-framework-build | tee log && date"
+#copyimg 
+alias cp8123="cd out/target/product/t8123b_l40mmeim_T1095_64/merged/;
+scp -r download_agent/ md1img.img vbmeta_system.img vbmeta_vendor.img vbmeta.img spmfw.img pi_img.img MT6789_Android_scatter.txt MT6789_Android_scatter.xml mcupm.img dpm.img preloader_t8123b_l40mmeim_T1095_64.bin sspm.img scp.img gz.img lk.img tee.img logo.bin dtbo.img boot.img vendor_boot.img userdata.img super.img software@192.168.0.246:/mnt/disk/Bu2/Bu_software/临时文件/fuhangchen/MTK/T8123B/shellcopy/;
+cd -"
+alias cp8630="cd out/target/product/t8630_l40mmeim_T1095_64_k510/ ;
+scp MT6768_Android_scatter.txt preloader_t8630_l40mmeim_T1095_64_k510.bin vbmeta.img vbmeta_system.img vbmeta_vendor.img md1img-verified.img spmfw-verified.img scp-verified.img sspm-verified.img gz-verified.img lk-verified.img boot.img vendor_boot.img dtbo-verified.img tee-verified.img logo-verified.bin super.img userdata.img software@192.168.0.246:/mnt/disk/Bu2/Bu_software/临时文件/fuhangchen/MTK/T8630/shellcopy/;
+cd -"
+alias cp8631="cd out/target/product/t8631_l40mmeim_T8_64_k510/ ;
+scp MT6768_Android_scatter.txt preloader_t8631_l40mmeim_T8_64_k510.bin vbmeta.img vbmeta_system.img vbmeta_vendor.img md1img-verified.img spmfw-verified.img scp-verified.img sspm-verified.img gz-verified.img lk-verified.img boot.img vendor_boot.img dtbo-verified.img tee-verified.img logo-verified.bin super.img userdata.img software@192.168.0.246:/mnt/disk/Bu2/Bu_software/临时文件/fuhangchen/MTK/T8631/shellcopy/;
+cd -"
+alias cp8631w="cd out/target/product/t8631_l40mmeim_T8_64_k510_wifi/ ;
+scp MT6768_Android_scatter.txt preloader_t8631_l40mmeim_T8_64_k510_wifi.bin vbmeta.img vbmeta_system.img vbmeta_vendor.img md1img-verified.img spmfw-verified.img scp-verified.img sspm-verified.img gz-verified.img lk-verified.img boot.img vendor_boot.img dtbo-verified.img tee-verified.img logo-verified.bin super.img userdata.img software@192.168.0.246:/mnt/disk/Bu2/Bu_software/临时文件/fuhangchen/MTK/T8631/shellcopy_wifionly/;
+cd -"
+alias cp8632w="cd out/target/product/t8632_l40mmeim_T1095_64_k510_wifi/;
+scp MT6768_Android_scatter.txt preloader_t8632_l40mmeim_T1095_64_k510_wifi.bin vbmeta.img vbmeta_system.img vbmeta_vendor.img md1img-verified.img spmfw-verified.img scp-verified.img sspm-verified.img gz-verified.img lk-verified.img boot.img vendor_boot.img dtbo-verified.img tee-verified.img logo-verified.bin super.img userdata.img software@192.168.0.246:/mnt/disk/Bu2/Bu_software/临时文件/fuhangchen/MTK/T8632/shellcopy_wifionly/;
+cd -"
+alias cp8633="cd out/target/product/tb8786p1_64_k510/merged/;
+scp MT6768_Android_scatter.txt preloader_tb8786p1_64_k510.bin vbmeta.img vbmeta_system.img vbmeta_vendor.img md1img.img spmfw.img sspm.img items.ini gz.img lk.img boot.img vendor_boot.img dtbo.img tee.img logo.bin super.img userdata.img software@192.168.0.246:/mnt/disk/Bu2/Bu_software/临时文件/fuhangchen/MTK/T8633/shellcopy/;
+cd -"
+alias cp8623="cd out/target/product/t8623_l40mmeim_T105_64_k66/merged/;
+scp MT6768_Android_scatter.txt MT6768_Android_scatter.xml init_boot.img preloader_t8623_l40mmeim_T105_64_k66.bin vbmeta.img vbmeta_system.img vbmeta_vendor.img md1img.img spmfw.img scp.img sspm.img gz.img lk.img boot.img vendor_boot.img dtbo.img tee.img logo.bin super.img userdata.img software@192.168.0.246:/mnt/disk/Bu2/Bu_software/临时文件/fuhangchen/MTK/T8623/shellcopy/;
+cd -"
+alias cpt2="cd out/target/product/tb8788p1_64_wifi_t2/;
+scp MT6771_Android_scatter.txt preloader_tb8788p1_64_wifi_t2.bin userdata.img boot.img dtbo-verified.img tee-verified.img cam_vpu1-verified.img cam_vpu2-verified.img cam_vpu3-verified.img lk-verified.img logo-verified.bin md1img-verified.img scp-verified.img spmfw-verified.img sspm-verified.img vbmeta.img vbmeta_system.img vbmeta_vendor.img super.img software@192.168.0.246:/mnt/disk/Bu2/Bu_software/临时文件/fuhangchen/MTK/T8332/8332-T2/t2_shellcopy/;
+cd -"
+
+alias cp7330="scp longan/out/a733_android15_pro3_card0_secure_v0.img software@192.168.0.246:/mnt/disk/Bu2/Bu_software/临时文件/fuhangchen/QZ/A733/;date"
+alias p7330="pack -d -v "
+export DISPLAY=192.168.2.80:0.0
+#scp 1.c software@192.168.2.170:/mnt/disk/Bu2/Bu_software/临时文件/fuhangchen/RK
+
+# Add an "alert" alias for long running commands.  Use like so:
+#   sleep 10; alert
+alias alert='notify-send --urgency=low -i "$([ $? = 0 ] && echo terminal || echo error)" "$(history|tail -n1|sed -e '\''s/^\s*[0-9]\+\s*//;s/[;&|]\s*alert$//'\'')"'
+#git push gerrit HEAD:refs/for/
+# Alias definitions.
+# You may want to put all your additions into a separate file like
+# ~/.bash_aliases, instead of adding them here directly.
+# See /usr/share/doc/bash-doc/examples in the bash-doc package.
+
+if [ -f ~/.bash_aliases ]; then
+    . ~/.bash_aliases
+fi
+
+# enable programmable completion features (you don't need to enable
+# this, if it's already enabled in /etc/bash.bashrc and /etc/profile
+# sources /etc/bash.bashrc).
+if ! shopt -oq posix; then
+  if [ -f /usr/share/bash-completion/bash_completion ]; then
+    . /usr/share/bash-completion/bash_completion
+  elif [ -f /etc/bash_completion ]; then
+    . /etc/bash_completion
+  fi
+fi
+
+export LC_ALL='C.UTF-8'
+export REPO_URL='https://mirrors.tuna.tsinghua.edu.cn/git/git-repo'
+
+export HISTTIMEFORMAT='%F %T'
+export HISTFILESIZE=100000
+
+source ~/emdoor.sh

@@ -1,0 +1,31 @@
+diff --git a/kernel-5.10/arch/arm64/configs/gki_defconfig b/kernel-5.10/arch/arm64/configs/gki_defconfig
+old mode 100644
+new mode 100755
+index 28136c6f643..7019d1502b5
+--- a/kernel-5.10/arch/arm64/configs/gki_defconfig
++++ b/kernel-5.10/arch/arm64/configs/gki_defconfig
+@@ -63,7 +63,7 @@ CONFIG_CP15_BARRIER_EMULATION=y
+ CONFIG_SETEND_EMULATION=y
+ CONFIG_RANDOMIZE_BASE=y
+ # CONFIG_RANDOMIZE_MODULE_REGION_FULL is not set
+-CONFIG_CMDLINE="stack_depot_disable=on kasan.stacktrace=off kvm-arm.mode=protected cgroup_disable=pressure cgroup.memory=nokmem"
++CONFIG_CMDLINE="panic_on_taint=20 stack_depot_disable=off kasan.stacktrace=on kvm-arm.mode=protected cgroup_disable=pressure cgroup.memory=nokmem"
+ CONFIG_CMDLINE_EXTEND=y
+ # CONFIG_DMI is not set
+ CONFIG_PM_WAKELOCKS=y
+diff --git a/kernel-5.10/arch/arm64/configs/t8632_l40mmeim_T1095_64_k510_wifi_defconfig b/kernel-5.10/arch/arm64/configs/t8632_l40mmeim_T1095_64_k510_wifi_defconfig
+index 273413e3cdf..51a413545c1 100755
+--- a/kernel-5.10/arch/arm64/configs/t8632_l40mmeim_T1095_64_k510_wifi_defconfig
++++ b/kernel-5.10/arch/arm64/configs/t8632_l40mmeim_T1095_64_k510_wifi_defconfig
+@@ -334,3 +334,10 @@ CONFIG_CUSTOM_MTK_KERNEL_HALL=m
+ CONFIG_TYPEC_ANALOG_HP=y
+ CONFIG_SND_SOC_SIA81XX=m
+ CONFIG_SND_SOC_AW87XXX_ONE_PA=m
++CONFIG_KASAN=y
++# CONFIG_KASAN_HW_TAGS is not set
++CONFIG_KASAN_INLINE=y
++CONFIG_KASAN_STACK=y
++CONFIG_FRAME_WARN=0
++CONFIG_DEBUG_SECTION_MISMATCH=y
++CONFIG_MTK_KASAN_MEMBLOCK_SKIP=y
+\ No newline at end of file

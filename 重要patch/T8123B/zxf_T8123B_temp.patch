@@ -1,0 +1,91 @@
+diff --git a/kernel-5.10/drivers/power/supply/mtk_battery.c b/kernel-5.10/drivers/power/supply/mtk_battery.c
+index d70514b9800..f89fdfd5194 100644
+--- a/kernel-5.10/drivers/power/supply/mtk_battery.c
++++ b/kernel-5.10/drivers/power/supply/mtk_battery.c
+@@ -47,6 +47,8 @@ int mmi_charge_enable_flag = 1;
+ EXPORT_SYMBOL(mmi_charge_enable_flag);
+ int mmi_charge_enable_all_flag = 1;
+ EXPORT_SYMBOL(mmi_charge_enable_all_flag);
++int temp_charge_enable_flag = 1;
++EXPORT_SYMBOL(temp_charge_enable_flag);
+ #endif
+ #ifdef CHGTMP_BATID
+ int batid_adc_fail = 0;
+@@ -649,7 +651,7 @@ void mtk_battery_external_power_changed(struct power_supply *psy)
+ 					POWER_SUPPLY_STATUS_CHARGING;
+ 			}
+ #ifdef CONFIG_SUPPORT_MMI_TEST
+-			if(!mmi_charge_enable_flag || !mmi_charge_enable_all_flag){
++			if(!mmi_charge_enable_flag || !mmi_charge_enable_all_flag || !temp_charge_enable_flag){
+ 				bm_err("MMI or temp_policy close charging logo\n");
+ 				bs_data->bat_status = POWER_SUPPLY_STATUS_DISCHARGING;
+ 			}
+diff --git a/kernel-5.10/drivers/power/supply/mtk_charger.c b/kernel-5.10/drivers/power/supply/mtk_charger.c
+index b36171fd97b..5c639996293 100644
+--- a/kernel-5.10/drivers/power/supply/mtk_charger.c
++++ b/kernel-5.10/drivers/power/supply/mtk_charger.c
+@@ -68,6 +68,7 @@
+ #ifdef CONFIG_SUPPORT_MMI_TEST
+ extern int mmi_charge_enable_flag;
+ extern int mmi_charge_enable_all_flag;
++extern int temp_charge_enable_flag;
+ extern int bat_id;
+ struct mtk_charger *mmi_pinfo;
+ extern void mtk_battery_external_power_changed(struct power_supply *psy);
+@@ -2458,7 +2459,7 @@ static void charger_check_status(struct mtk_charger *info)
+ 				thermal->sm = BAT_TEMP_LOW;
+ 				charging = false;
+ 				#ifdef CONFIG_SUPPORT_MMI_TEST
+-				mmi_charge_enable_flag = 0;
++				temp_charge_enable_flag = 0;
+ 				#endif
+ 				goto stop_charging;
+ 			} else if (thermal->sm == BAT_TEMP_LOW) {
+@@ -2470,12 +2471,12 @@ static void charger_check_status(struct mtk_charger *info)
+ 					thermal->min_charge_temp_plus_x_degree);
+ 					thermal->sm = BAT_TEMP_NORMAL;
+ 					#ifdef CONFIG_SUPPORT_MMI_TEST
+-					mmi_charge_enable_flag = 1;
++					temp_charge_enable_flag = 1;
+ 					#endif
+ 				} else {
+ 					charging = false;
+ 					#ifdef CONFIG_SUPPORT_MMI_TEST
+-					mmi_charge_enable_flag = 0;
++					temp_charge_enable_flag = 0;
+ 					#endif
+ 					goto stop_charging;
+ 				}
+@@ -2488,7 +2489,7 @@ static void charger_check_status(struct mtk_charger *info)
+ 			thermal->sm = BAT_TEMP_HIGH;
+ 			charging = false;
+ 			#ifdef CONFIG_SUPPORT_MMI_TEST
+-			mmi_charge_enable_flag = 0;
++			temp_charge_enable_flag = 0;
+ 			#endif
+ 			goto stop_charging;
+ 		} else if (thermal->sm == BAT_TEMP_HIGH) {
+@@ -2500,12 +2501,12 @@ static void charger_check_status(struct mtk_charger *info)
+ 				thermal->max_charge_temp_minus_x_degree);
+ 				thermal->sm = BAT_TEMP_NORMAL;
+ 				#ifdef CONFIG_SUPPORT_MMI_TEST
+-				mmi_charge_enable_flag = 1;
++				temp_charge_enable_flag = 1;
+ 				#endif
+ 			} else {
+ 				charging = false;
+ 				#ifdef CONFIG_SUPPORT_MMI_TEST
+-				mmi_charge_enable_flag = 0;
++				temp_charge_enable_flag = 0;
+ 				#endif
+ 				goto stop_charging;
+ 			}
+@@ -2551,7 +2552,7 @@ static void charger_check_status(struct mtk_charger *info)
+ 		charger_dev_enable_hz(info->chg1_dev,1);
+ 		charger_dev_enable_hz(info->chg2_dev,1);
+ 		charging = false;
+-	}else if(!mmi_charge_enable_flag){
++	}else if(!mmi_charge_enable_flag || !temp_charge_enable_flag){
+ 		chr_err("MMI or temp_policy stop charging\n");
+ 		charging = false;
+ 	}

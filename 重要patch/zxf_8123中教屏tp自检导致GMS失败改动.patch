@@ -1,0 +1,64 @@
+diff --git a/device/emdoor/t8123_l40mmeiw_T122ZHJ_64/init.project.rc b/device/emdoor/t8123_l40mmeiw_T122ZHJ_64/init.project.rc
+index 50088314e53..db28a62ad0b 100755
+--- a/device/emdoor/t8123_l40mmeiw_T122ZHJ_64/init.project.rc
++++ b/device/emdoor/t8123_l40mmeiw_T122ZHJ_64/init.project.rc
+@@ -40,6 +40,9 @@ on post-fs-data
+ 	
+     chmod 0660 /dev/extcon_vbus
+     chown system system /dev/extcon_vbus
++	
++	chmod 0660 /sys/devices/platform/soc/11010000.spi1/spi_master/spi1/spi1.1/self_test
++	chown system system /sys/devices/platform/soc/11010000.spi1/spi_master/spi1/spi1.1/self_test
+ 
+ on init
+     # Refer to http://source.android.com/devices/tech/storage/index.html
+diff --git a/device/mediatek/sepolicy/bsp/non_plat/file.te b/device/mediatek/sepolicy/bsp/non_plat/file.te
+index 5b9da944abc..69716fa622d 100644
+--- a/device/mediatek/sepolicy/bsp/non_plat/file.te
++++ b/device/mediatek/sepolicy/bsp/non_plat/file.te
+@@ -23,7 +23,7 @@ type proc_freqhopping, fs_type, proc_type;
+ #
+ # TEEI data file
+ type teei_control_file, fs_type, sysfs_type;
+-
++type self_test, fs_type, sysfs_type;
+ ##########################
+ # File types
+ #
+diff --git a/device/mediatek/sepolicy/bsp/non_plat/file_contexts b/device/mediatek/sepolicy/bsp/non_plat/file_contexts
+index 3eae6255452..f130dca88ca 100755
+--- a/device/mediatek/sepolicy/bsp/non_plat/file_contexts
++++ b/device/mediatek/sepolicy/bsp/non_plat/file_contexts
+@@ -277,3 +277,8 @@
+ #
+ /mnt/vendor/persist/t6(/.*)?    u:object_r:tkcore_protect_data_file:s0
+ /mnt/vendor/protect_f/tee(/.*)? u:object_r:tkcore_protect_data_file:s0
++/vendor/firmware/Conf_MultipleTest.ini u:object_r:same_process_hal_file:s0
++/vendor/firmware/Himax_firmware.bin u:object_r:same_process_hal_file:s0
++/vendor/firmware/Himax_firmware_lxd.bin u:object_r:same_process_hal_file:s0
++/vendor/firmware/hx_criteria.csv u:object_r:same_process_hal_file:s0
++/vendor/firmware/Himax_mpfw.bin u:object_r:same_process_hal_file:s0
+diff --git a/device/mediatek/sepolicy/bsp/non_plat/genfs_contexts b/device/mediatek/sepolicy/bsp/non_plat/genfs_contexts
+index ff1d4b18cdf..5262892f55a 100644
+--- a/device/mediatek/sepolicy/bsp/non_plat/genfs_contexts
++++ b/device/mediatek/sepolicy/bsp/non_plat/genfs_contexts
+@@ -36,6 +36,7 @@ genfscon sysfs /devices/platform/soc/11250000.mmc/mmc_host/mmc2/mmc2:0001/mmc2:0
+ genfscon sysfs /devices/platform/11240000.msdc/mmc_host/mmc1/mmc1:0001/mmc1:0001:1/net/wlan0/mtu u:object_r:sysfs_net:s0
+ genfscon sysfs /devices/platform/11240000.msdc/mmc_host/mmc1/mmc1:0001/mmc1:0001:1/net/ap0/mtu u:object_r:sysfs_net:s0
+ genfscon sysfs /devices/platform/11240000.msdc/mmc_host/mmc1/mmc1:0001/mmc1:0001:1/net/p2p0/mtu u:object_r:sysfs_net:s0
++genfscon sysfs /devices/platform/soc/11010000.spi1/spi_master/spi1/spi1.1/self_test u:object_r:self_test:s0
+ 
+ # for 7668 VTS NetdSELinuxTest.CheckProperMTULabels requirement
+ genfscon sysfs /devices/platform/soc/11170000.sdio/mmc_host/mmc1/mmc1:0001/mmc1:0001:1/net/wlan0/mtu u:object_r:sysfs_net:s0
+diff --git a/device/mediatek/sepolicy/bsp/non_plat/shell.te b/device/mediatek/sepolicy/bsp/non_plat/shell.te
+index 50feeb6aabd..55ce06a5db7 100644
+--- a/device/mediatek/sepolicy/bsp/non_plat/shell.te
++++ b/device/mediatek/sepolicy/bsp/non_plat/shell.te
+@@ -15,6 +15,7 @@ userdebug_or_eng(`
+ # Purpose: Allow shell to read trustkernel log
+ allow shell tkcore_data_file:dir search;
+ allow shell tkcore_log_file:file r_file_perms;
++allow shell self_test:file { read open getattr write};
+ 
+ # Date : WK19.07 2019/06/13
+ # Operation : mdi_redirector integration test with AT&T Linkmaster

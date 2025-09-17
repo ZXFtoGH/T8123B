@@ -1,0 +1,17 @@
+diff --git a/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/mt6789/platform.c b/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/mt6789/platform.c
+index ffb92e4aa0f..b2404c0fb9c 100644
+--- a/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/mt6789/platform.c
++++ b/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/mt6789/platform.c
+@@ -196,7 +196,11 @@ void platform_init(void)
+     PROFILING(drv_video_init());
+     PROFILING(dbgtop_drm_init(fdt));
+     PROFILING(dfd_mcu_init(fdt));
+-
++    while(1)
++	{
++		spin(1000000);
++		mtk_wdt_restart_timer();
++	}
+     /* finished platform init, free dtb */
+     if (fdt)
+         free(fdt);

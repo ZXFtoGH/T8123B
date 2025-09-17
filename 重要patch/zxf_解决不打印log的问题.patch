@@ -1,0 +1,13 @@
+diff --git a/vendor/mediatek/proprietary/bootable/bootloader/preloader/platform/mt6789/src/drivers/platform.c b/vendor/mediatek/proprietary/bootable/bootloader/preloader/platform/mt6789/src/drivers/platform.c
+index fb0d6c7a3fa..dfb53f00f11 100644
+--- a/vendor/mediatek/proprietary/bootable/bootloader/preloader/platform/mt6789/src/drivers/platform.c
++++ b/vendor/mediatek/proprietary/bootable/bootloader/preloader/platform/mt6789/src/drivers/platform.c
+@@ -1374,7 +1374,7 @@ void platform_pre_init(void)
+         pal_log_info("Vol Up detected. Log Keep on.\n");
+     } else {
+         pal_log_err("Log Turned Off.\n");
+-        set_log_switch(0);
++        //set_log_switch(0);
+     }
+     BOOTING_TIME_PROFILING_LOG("UART DYNAMIC SWITCH");
+ #else

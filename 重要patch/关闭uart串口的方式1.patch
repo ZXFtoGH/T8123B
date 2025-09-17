@@ -1,0 +1,33 @@
+diff --git a/system/core/rootdir/init.rc b/system/core/rootdir/init.rc
+index 376a678a836..efee50aa57b 100644
+--- a/system/core/rootdir/init.rc
++++ b/system/core/rootdir/init.rc
+@@ -1211,8 +1211,8 @@ on property:ro.debuggable=1
+     # Give reads to anyone for the accessibility trace folder on debug builds.
+     chmod 0775 /data/misc/a11ytrace
+ 
+-on init && property:ro.debuggable=1
+-    start console
++#on init && property:ro.debuggable=1
++#    start console
+ 
+ on userspace-reboot-requested
+   # TODO(b/135984674): reset all necessary properties here.
+diff --git a/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/common/debug/dynamic_log.c b/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/common/debug/dynamic_log.c
+index ed790c9e664..33b07dfcdd3 100644
+--- a/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/common/debug/dynamic_log.c
++++ b/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/common/debug/dynamic_log.c
+@@ -54,11 +54,12 @@ static void dynamic_log_set_cmdline(uint level)
+         snprintf(tmpbuf, sizeof(tmpbuf) - 1, "earlycon=uart8250,mmio32,0x%x", log_com_state.log_port);
+         kcmdline_append(tmpbuf);
+ 
++        //屏蔽下述3行后会开机dump
+         memset(tmpbuf, 0x0, sizeof(tmpbuf));
+         snprintf(tmpbuf, sizeof(tmpbuf) - 1, "console=ttyS%d,%dn1", log_port(), log_baudrate());
+         kcmdline_append(tmpbuf);
+ 
+-        kcmdline_append("mtk_printk_ctrl.disable_uart=0");
++        kcmdline_append("mtk_printk_ctrl.disable_uart=1");  //当为1或0时，串口只打印开机过程log，开机后不再打印log，此处修补修改不影响
+     } else
+         kcmdline_append("mtk_printk_ctrl.disable_uart=1");
+ }

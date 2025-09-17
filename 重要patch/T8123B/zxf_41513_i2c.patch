@@ -1,0 +1,107 @@
+diff --git a/kernel-5.10/drivers/power/supply/sgm41513_charger.c b/kernel-5.10/drivers/power/supply/sgm41513_charger.c
+index b3b5aafb9cd..c9a0008c5e3 100755
+--- a/kernel-5.10/drivers/power/supply/sgm41513_charger.c
++++ b/kernel-5.10/drivers/power/supply/sgm41513_charger.c
+@@ -164,13 +164,45 @@ static int __sgm41513_write_reg(struct sgm41513 *sgm, int reg, u8 val)
+ 
+ static int sgm41513_read_byte(struct sgm41513 *sgm, u8 reg, u8 *data)
+ {
+-	int ret;
++	// int ret;
++
++	// mutex_lock(&sgm->i2c_rw_lock);
++	// ret = __sgm41513_read_reg(sgm, reg, data);
++	// mutex_unlock(&sgm->i2c_rw_lock);
+ 
++	// return ret;
++	
++	unsigned char xfers = 2;
++    int ret, retries = 1;
+ 	mutex_lock(&sgm->i2c_rw_lock);
+-	ret = __sgm41513_read_reg(sgm, reg, data);
+-	mutex_unlock(&sgm->i2c_rw_lock);
+ 
+-	return ret;
++	do {
++        struct i2c_msg msgs[2] = {
++            {
++                .addr = sgm->client->addr,
++                .flags = 0,
++                .len = 1,
++                .buf = &reg,
++            },
++            {
++                .addr = sgm->client->addr,
++                .flags = I2C_M_RD,
++                .len = 1,
++                .buf = data,
++            }
++        };
++
++		ret = i2c_transfer(sgm->client->adapter, msgs, xfers);
++
++        if (ret == -ENXIO) {
++            sgm_info("skipping non-existent adapter %s\n",
++                    sgm->client->adapter->name);
++            break;
++        }
++    } while (ret != xfers && --retries);
++
++	mutex_unlock(&sgm->i2c_rw_lock);
++	return ret == xfers ? 0 : -EIO;
+ }
+ 
+ static int sgm41513_read_bits(struct sgm41513 *sgm, u8 reg, u8 *data, u8 mask, u8 shift)
+@@ -192,16 +224,46 @@ static int sgm41513_read_bits(struct sgm41513 *sgm, u8 reg, u8 *data, u8 mask, u
+ 
+ static int sgm41513_write_byte(struct sgm41513 *sgm, u8 reg, u8 data)
+ {
+-	int ret;
++	// int ret;
++
++	// mutex_lock(&sgm->i2c_rw_lock);
++	// ret = __sgm41513_write_reg(sgm, reg, data);
++	// mutex_unlock(&sgm->i2c_rw_lock);
++
++	// if (ret)
++	// 	sgm_info("Failed: reg=%02X, ret=%d\n", reg, ret);
++
++	// return ret;
++
++	unsigned char xfers = 1;
++    int ret, retries = 1;
++    unsigned char buf[8];
+ 
+ 	mutex_lock(&sgm->i2c_rw_lock);
+-	ret = __sgm41513_write_reg(sgm, reg, data);
++	buf[0] = reg;
++    memcpy(&buf[1], &data, 1);
++
++    do {
++        struct i2c_msg msgs[1] = {
++            {
++                .addr = sgm->client->addr,
++                .flags = 0,
++                .len = 1 + 1,
++                .buf = buf,
++            },
++        };
++
++        ret = i2c_transfer(sgm->client->adapter, msgs, xfers);
++
++        if (ret == -ENXIO) {
++            pr_info("skipping non-existent adapter %s\n",
++                    sgm->client->adapter->name);
++            break;
++        }
++    } while (ret != xfers && --retries);
+ 	mutex_unlock(&sgm->i2c_rw_lock);
++	return ret == xfers ? 0 : -EIO;
+ 
+-	if (ret)
+-		sgm_info("Failed: reg=%02X, ret=%d\n", reg, ret);
+-
+-	return ret;
+ }
+ 
+ static int sgm41513_update_bits(struct sgm41513 *sgm, u8 reg, u8 data, u8 mask, u8 shift)

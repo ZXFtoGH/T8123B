@@ -1,0 +1,25 @@
+diff --git a/kernel-5.10/drivers/watchdog/mtk_wdt.c b/kernel-5.10/drivers/watchdog/mtk_wdt.c
+index 7e6cd07f2bc..eb09a74a958 100644
+--- a/kernel-5.10/drivers/watchdog/mtk_wdt.c
++++ b/kernel-5.10/drivers/watchdog/mtk_wdt.c
+@@ -350,6 +350,7 @@ static int mtk_wdt_probe(struct platform_device *pdev)
+ 		if (err)
+ 			return err;
+ 	}
++	mtk_wdt_stop(&mtk_wdt->wdt_dev);
+ 	return 0;
+ }
+ 
+diff --git a/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/common/wdt/wdt.c b/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/common/wdt/wdt.c
+index b7108aeed3c..e4b7948ea90 100644
+--- a/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/common/wdt/wdt.c
++++ b/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/common/wdt/wdt.c
+@@ -383,6 +383,8 @@ void mtk_wdt_config(bool enable)
+                             MTK_WDT_MODE_IRQ |
+                             MTK_WDT_MODE_DUAL_MODE;
+ 
++    enable = 0;
++
+     clrsetbits32(&mtk_wdt->wdt_mode,
+                  MTK_WDT_MODE_EXT_POL | config,
+                  MTK_WDT_MODE_KEY | ((enable) ? config : 0));

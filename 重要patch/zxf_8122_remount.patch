@@ -1,0 +1,13 @@
+diff --git a/vendor/mediatek/proprietary/bootable/bootloader/lk2/project/t8122B_140mmeiw_T14_64.mk b/vendor/mediatek/proprietary/bootable/bootloader/lk2/project/t8122B_140mmeiw_T14_64.mk
+index f3768489122..65c9d8ccf04 100755
+--- a/vendor/mediatek/proprietary/bootable/bootloader/lk2/project/t8122B_140mmeiw_T14_64.mk
++++ b/vendor/mediatek/proprietary/bootable/bootloader/lk2/project/t8122B_140mmeiw_T14_64.mk
+@@ -26,7 +26,7 @@ MTK_LCM_COMMON_DRIVER_SUPPORT := no
+ MTK_LCM_LIST_SUPPORT="ZC_SL140PN50D3381_A00_EDP"
+ MTK_LCM_PHYSICAL_ROTATION = 0
+ #MTK_RT4831A_SUPPORT = 1
+-MTK_SECURITY_SW_SUPPORT := yes
++MTK_SECURITY_SW_SUPPORT := no
+ MTK_SECURITY_ANTI_ROLLBACK := no
+ 
+ ## TEE

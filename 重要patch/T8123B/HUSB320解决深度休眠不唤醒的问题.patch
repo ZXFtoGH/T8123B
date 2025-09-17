@@ -1,0 +1,73 @@
+diff --git a/kernel-5.10/drivers/misc/mediatek/typec/tcpc/tcpc_husb320.c b/kernel-5.10/drivers/misc/mediatek/typec/tcpc/tcpc_husb320.c
+index a491c5df3c5..1896d7035fa 100755
+--- a/kernel-5.10/drivers/misc/mediatek/typec/tcpc/tcpc_husb320.c
++++ b/kernel-5.10/drivers/misc/mediatek/typec/tcpc/tcpc_husb320.c
+@@ -246,6 +246,7 @@
+ extern uint8_t get_typec_cc_orientation(uint8_t x1);
+ extern uint8_t typec_cc;
+ 
++
+ bool first_check = true;
+ bool husb320_init_status = false;
+ struct husb320_chip *chip_chg;
+@@ -292,6 +293,9 @@ struct husb320_chip {
+ #ifdef HAVE_DR
+ 	struct dual_role_phy_desc *desc;
+ #endif /* HAVE_DR */
++
++   struct wakeup_source *husb320_wakelock;
++   struct delayed_work relax_wake_lock_work;
+ };
+ #define typec_update_state(chip, st) \
+ 	do { \
+@@ -2441,6 +2445,17 @@ static struct tcpc_ops husb320_tcpc_ops = {
+ 	//.get_mode = husb320_get_mode,
+ 	.deinit = husb320_tcpc_deinit,
+ };
++
++static void husb320_relax_work(struct work_struct *work)
++{
++    struct husb320_chip *chip = container_of(work, struct husb320_chip, relax_wake_lock_work.work);
++       
++    if (chip->husb320_wakelock->active)
++			__pm_relax(chip->husb320_wakelock);
++	printk("%s \n",__FUNCTION__);
++    return;
++}
++
+ static void husb320_first_check_typec_work(struct work_struct *work)
+ {
+ 	struct husb320_chip *chip = container_of(work,
+@@ -2589,6 +2604,10 @@ static int husb320_probe(struct i2c_client *client,
+ 	INIT_DELAYED_WORK(&chip->first_check_typec_work,
+ 			husb320_first_check_typec_work);
+ 	mutex_init(&chip->mlock);
++	chip->husb320_wakelock =
++		wakeup_source_register(NULL, "husb320_wakelock");
++	INIT_DELAYED_WORK(&chip->relax_wake_lock_work, husb320_relax_work);
++	
+ 	ret = husb320_create_devices(cdev);
+ 	if (ret < 0) {
+ 		dev_err(cdev, "%s: could not create devices\n", __func__);
+@@ -2732,6 +2751,7 @@ static void husb320_shutdown(struct i2c_client *client)
+ 	if (rc < 0)
+ 		dev_err(cdev, "%s: fail to disable auto snk func\n", __func__);
+ }
++
+ #ifdef CONFIG_PM
+ static int husb320_suspend(struct device *dev)
+ {
+@@ -2756,7 +2776,13 @@ static int husb320_resume(struct device *dev)
+ 	struct device *cdev = &client->dev;
+ 
+ 	dev_err(cdev, "%s: enter\n", __func__);
++	
++	if (!chip->husb320_wakelock->active)
++			__pm_stay_awake(chip->husb320_wakelock);
+ 
++	schedule_delayed_work(&chip->relax_wake_lock_work,
++			msecs_to_jiffies(2000));
++	
+ 	if (!chip) {
+ 		dev_err(cdev, "%s: No device is available!\n", __func__);
+ 		return -EINVAL;

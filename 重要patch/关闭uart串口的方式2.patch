@@ -1,0 +1,247 @@
+diff --git a/build/make/envsetup.sh b/build/make/envsetup.sh
+index 9a192761656..2d53a38d7ab 100644
+--- a/build/make/envsetup.sh
++++ b/build/make/envsetup.sh
+@@ -730,7 +730,7 @@ function lunch()
+     destroy_build_var_cache
+ 
+     ### START. T0-Split 准备环境变量. By XShawn@20221128.
+-    prepare_mssi_after_lunch_vnd
++    # prepare_mssi_after_lunch_vnd
+     ### END. T0-Split 准备环境变量. By XShawn@20221128.
+ }
+ 
+diff --git a/device/emdoor/t8123_l40mmeiw_T1095_64/init.project.rc b/device/emdoor/t8123_l40mmeiw_T1095_64/init.project.rc
+index 50088314e53..e5cc5429856 100755
+--- a/device/emdoor/t8123_l40mmeiw_T1095_64/init.project.rc
++++ b/device/emdoor/t8123_l40mmeiw_T1095_64/init.project.rc
+@@ -36,6 +36,9 @@ on post-fs-data
+ 
+     chmod 0660 /dev/spm
+     chown system system /dev/spm
++
++    chmod 0777 /dev/ttyS0
++    chown system system /dev/ttyS0
+ 	
+ 	
+     chmod 0660 /dev/extcon_vbus
+diff --git a/device/emdoor/t8123_l40mmeiw_T1095_64/ko_order_table.csv b/device/emdoor/t8123_l40mmeiw_T1095_64/ko_order_table.csv
+index 426122075e0..419773ba33b 100755
+--- a/device/emdoor/t8123_l40mmeiw_T1095_64/ko_order_table.csv
++++ b/device/emdoor/t8123_l40mmeiw_T1095_64/ko_order_table.csv
+@@ -8,7 +8,6 @@ aee_aed.ko,/drivers/misc/mediatek/aee/aed/aee_aed.ko,ramdisk,Y,Y,user/userdebug/
+ aee_hangdet.ko,/drivers/misc/mediatek/aee/hangdet/aee_hangdet.ko,ramdisk,Y,Y,user/userdebug/eng
+ monitor_hang.ko,/drivers/misc/mediatek/monitor_hang/monitor_hang.ko,ramdisk,Y,Y,user/userdebug/eng
+ mtk_printk_ctrl.ko,/drivers/misc/mediatek/mtprintk/mtk_printk_ctrl.ko,ramdisk,Y,Y,user/userdebug/eng
+-log_store.ko,/drivers/misc/mediatek/log_store/log_store.ko,ramdisk,Y,Y,user/userdebug/eng
+ nvmem_mtk-devinfo.ko,/drivers/nvmem/nvmem_mtk-devinfo.ko,ramdisk,Y,Y,user/userdebug/eng
+ mtk_wdt.ko,/drivers/watchdog/mtk_wdt.ko,ramdisk,Y,Y,user/userdebug/eng
+ sec-rng.ko,/drivers/char/hw_random/sec-rng.ko,ramdisk,Y,Y,user/userdebug/eng
+@@ -321,5 +320,5 @@ spmtwam.ko,/drivers/misc/mediatek/pmsr/twam/spmtwam.ko,vendor,Y,N,user/userdebug
+ mtk_disp_sec.ko,/drivers/gpu/drm/mediatek/mediatek_v2/mtk_disp_sec.ko,vendor,Y,N,user/userdebug/eng
+ hxchipset_spi_122.ko,/drivers/input/touchscreen/hxchipset_spi_t8123_122/hxchipset_spi_122.ko,ramdisk,Y,N,user/userdebug/eng
+ sec.ko,/drivers/misc/mediatek/masp/sec.ko,vendor,Y,Y,user/userdebug/eng
+-switch_pogo.ko,/drivers/misc/mediatek/pogo/switch_pogo.ko,vendor,Y,N,user/userdebug/eng
++switch_pogo2.ko,/drivers/misc/mediatek/pogo2/switch_pogo2.ko,ramdisk,Y,N,user/userdebug/eng
+ switch_hall.ko,/drivers/input/misc/switch_hall.ko,vendor,Y,N,user/userdebug/eng
+diff --git a/kernel-5.10/arch/arm64/boot/dts/mediatek/mt6789.dts b/kernel-5.10/arch/arm64/boot/dts/mediatek/mt6789.dts
+index 693f2821570..e2478344135 100644
+--- a/kernel-5.10/arch/arm64/boot/dts/mediatek/mt6789.dts
++++ b/kernel-5.10/arch/arm64/boot/dts/mediatek/mt6789.dts
+@@ -57,7 +57,7 @@ aliases {
+ 	/* chosen */
+ 	chosen: chosen {
+ 		bootargs = "console=tty0 root=/dev/ram \
+-			    loglevel=8 \
++			    loglevel=0 \
+ 			    8250.nr_uarts=4 \
+ 			    androidboot.hardware=mt6789 \
+ 			    initcall_debug=1 transparent_hugepage=never \
+diff --git a/kernel-5.10/arch/arm64/boot/dts/mediatek/t8123_l40mmeiw_T1095_64.dts b/kernel-5.10/arch/arm64/boot/dts/mediatek/t8123_l40mmeiw_T1095_64.dts
+index f1c0546d455..a23c28fadb2 100755
+--- a/kernel-5.10/arch/arm64/boot/dts/mediatek/t8123_l40mmeiw_T1095_64.dts
++++ b/kernel-5.10/arch/arm64/boot/dts/mediatek/t8123_l40mmeiw_T1095_64.dts
+@@ -53,6 +53,14 @@ pogo_1: pogo_1{
+         compatible = "emdoor,pogo";
+         status = "okay";
+     };
++	pogo_2: pogo_2{
++		compatible = "emdoor,pogo2";
++		status = "okay";
++		default-state = "on";
++		usb_sel-gpios = <&pio 45 GPIO_ACTIVE_HIGH>;
++		pogo_pwren-gpios = <&pio 47 GPIO_ACTIVE_HIGH>;
++		pogo_int-gpios = <&pio 1 GPIO_ACTIVE_HIGH>;
++	};
+ };
+ 
+ &mtk_composite_v4l2_1 {
+@@ -348,7 +356,7 @@ &charger {
+ 	ac_charger_input_current = <2000000>;
+ 
+ 	chg1_ac_charger_current = <3000000>;
+-	chg1_ac_charger_input_current = <1100000>;
++	chg1_ac_charger_input_current = <2000000>;
+ 
+ 	chg2_ac_charger_current = <3000000>;
+ 	chg2_ac_charger_input_current = <1000000>;
+@@ -580,7 +588,7 @@ pd-data {
+ 			pd,source-pdo-size = <1>;
+ 			pd,source-pdo-data = <0x00019032>;
+ 			pd,sink-pdo-size = <1>;
+-			pd,sink-pdo-data = <0x0002d0c8>;
++			pd,sink-pdo-data = <0x0001912c>;
+ 
+ 			/*
+ 			 * No DP, host + device
+diff --git a/kernel-5.10/arch/arm64/configs/mgk_t8123_l40mmeiw_T1095_64_defconfig b/kernel-5.10/arch/arm64/configs/mgk_t8123_l40mmeiw_T1095_64_defconfig
+index 1c013917665..cc9e9806baa 100644
+--- a/kernel-5.10/arch/arm64/configs/mgk_t8123_l40mmeiw_T1095_64_defconfig
++++ b/kernel-5.10/arch/arm64/configs/mgk_t8123_l40mmeiw_T1095_64_defconfig
+@@ -632,7 +632,8 @@ CONFIG_EMDOOR_DEVICEINFO=m
+ CONFIG_FIX_ATA_WIFI_E2BIG=y
+ CONFIG_TOUCHSCREEN_GOODIX_BRL=m
+ CONFIG_CUSTOM_MTK_KERNEL_HALL=m
+-CONFIG_CUSTOM_MTK_KERNEL_POGO=m
++# CONFIG_CUSTOM_MTK_KERNEL_POGO=m
++CONFIG_CUSTOM_MTK_KERNEL_POGO2=m
+ CONFIG_CHARGER_SECOND_MAINCHG=y
+ CONFIG_TYPEC_ANALOG_HP=y
+ CONFIG_BATTERY_UA2898114A=y
+diff --git a/kernel-5.10/drivers/power/supply/mtk_battery.c b/kernel-5.10/drivers/power/supply/mtk_battery.c
+index afec78bf764..a2fe68aac4a 100644
+--- a/kernel-5.10/drivers/power/supply/mtk_battery.c
++++ b/kernel-5.10/drivers/power/supply/mtk_battery.c
+@@ -830,7 +830,7 @@ int adc_battemp(struct mtk_battery *gm, int res)
+ 		tbatt_value = (((res - res2) * tmp1) +
+ 			((res1 - res) * tmp2)) / (res1 - res2);
+ 	}
+-	bm_err("[%s] %d %d %d %d %d %d\n",
++	bm_debug("[%s] %d %d %d %d %d %d\n",
+ 		__func__,
+ 		res1, res2, res, tmp1,
+ 		tmp2, tbatt_value);
+diff --git a/kernel-5.10/drivers/power/supply/upm6910x_main.c b/kernel-5.10/drivers/power/supply/upm6910x_main.c
+index b8925bd8509..988cee8927f 100755
+--- a/kernel-5.10/drivers/power/supply/upm6910x_main.c
++++ b/kernel-5.10/drivers/power/supply/upm6910x_main.c
+@@ -796,7 +796,7 @@ static int upm6910x_main_plug_in(struct charger_device *chg_dev)
+ 	if (ret) {
+ 		pr_err("Failed to enable charging:%d", ret);
+ 	}
+-	QC_flag = 1;
++	// QC_flag = 1;
+     return ret;
+ }
+ static int upm6910x_main_plug_out(struct charger_device *chg_dev)
+diff --git a/system/core/rootdir/init.rc b/system/core/rootdir/init.rc
+index 376a678a836..e21438e07fe 100644
+--- a/system/core/rootdir/init.rc
++++ b/system/core/rootdir/init.rc
+@@ -1193,14 +1193,14 @@ service ueventd /system/bin/ueventd
+     seclabel u:r:ueventd:s0
+     shutdown critical
+ 
+-service console /system/bin/sh
+-    class core
+-    console
+-    disabled
+-    user shell
+-    group shell log readproc
+-    seclabel u:r:shell:s0
+-    setenv HOSTNAME console
++#service console /system/bin/sh
++#    class core
++#    console
++#    disabled
++#    user shell
++#    group shell log readproc
++#    seclabel u:r:shell:s0
++#    setenv HOSTNAME console
+ 
+ on property:ro.debuggable=1
+     # Give writes to anyone for the trace folder on debug builds.
+diff --git a/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/common/debug/debug.c b/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/common/debug/debug.c
+index 88e16c1ec71..d91e6104e5b 100644
+--- a/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/common/debug/debug.c
++++ b/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/common/debug/debug.c
+@@ -48,11 +48,11 @@ void platform_dputc(char c)
+ {
+     if (!log_dynamic_switch())
+         return;
++    // 下述代码屏蔽不屏蔽均可以，有无的差别主要是开机log的打印不一样而已，功能是一样的
++    // if (c == '\n')
++        // uart_putc(log_port(), '\r');
+ 
+-    if (c == '\n')
+-        uart_putc(log_port(), '\r');
+-
+-    uart_putc(log_port(), c);
++    // uart_putc(log_port(), c);
+ }
+ 
+ int platform_dgetc(char *c, bool wait)
+diff --git a/vendor/mediatek/proprietary/bootable/bootloader/preloader/platform/mt6789/src/core/print.c b/vendor/mediatek/proprietary/bootable/bootloader/preloader/platform/mt6789/src/core/print.c
+index 76cde3a7e34..cd413244201 100644
+--- a/vendor/mediatek/proprietary/bootable/bootloader/preloader/platform/mt6789/src/core/print.c
++++ b/vendor/mediatek/proprietary/bootable/bootloader/preloader/platform/mt6789/src/core/print.c
+@@ -69,18 +69,18 @@ static void outchar(const char c)
+         else
+             g_log_miss_chrs++;
+     } else {
+-        if (get_log_switch()) {
+-            PutUARTByte(c);
+-            #if (CFG_DRAM_LOG_TO_STORAGE)
+-            log_to_storage(c);
+-            #endif //#if CFG_DRAM_LOG_TO_STORAGE
+-        }
+-        pl_log_store(c);
++        // if (get_log_switch()) {
++        //     PutUARTByte(c);
++        //     #if (CFG_DRAM_LOG_TO_STORAGE)
++        //     log_to_storage(c);
++        //     #endif //#if CFG_DRAM_LOG_TO_STORAGE
++        // }
++        // pl_log_store(c);
+     }
+ 
+-#if (CFG_OUTPUT_PL_LOG_TO_UART1	&& !(defined(HW_INIT_ONLY) || defined(SLT) || defined(DUMMY_AP) || defined(TINY)))
+-	PutUART1_Byte(c);
+-#endif //#if CFG_OUTPUT_PL_LOG_TO_UART1
++// #if (CFG_OUTPUT_PL_LOG_TO_UART1	&& !(defined(HW_INIT_ONLY) || defined(SLT) || defined(DUMMY_AP) || defined(TINY)))
++// 	PutUART1_Byte(c);
++// #endif //#if CFG_OUTPUT_PL_LOG_TO_UART1
+ }
+ 
+ static void outstr(const unsigned char *s)
+diff --git a/vendor/mediatek/proprietary/trustzone/tf-a-2.4/Makefile b/vendor/mediatek/proprietary/trustzone/tf-a-2.4/Makefile
+index d49239e8fb0..14b24f3be32 100644
+--- a/vendor/mediatek/proprietary/trustzone/tf-a-2.4/Makefile
++++ b/vendor/mediatek/proprietary/trustzone/tf-a-2.4/Makefile
+@@ -270,11 +270,11 @@ ifneq (${DEBUG}, 0)
+         endif
+ 
+         # Use LOG_LEVEL_INFO by default for debug builds
+-        LOG_LEVEL	:=	40
++        LOG_LEVEL	:=	0
+ else
+         BUILD_TYPE	:=	release
+         # Use LOG_LEVEL_NOTICE by default for release builds
+-        LOG_LEVEL	:=	20
++        LOG_LEVEL	:=	0
+ endif
+ 
+ # Default build string (git branch and commit)
+diff --git a/vendor/mediatek/proprietary/trustzone/tf-a-2.4/plat/brcm/board/common/board_common.mk b/vendor/mediatek/proprietary/trustzone/tf-a-2.4/plat/brcm/board/common/board_common.mk
+index 3069f914b83..5b034c97dd7 100644
+--- a/vendor/mediatek/proprietary/trustzone/tf-a-2.4/plat/brcm/board/common/board_common.mk
++++ b/vendor/mediatek/proprietary/trustzone/tf-a-2.4/plat/brcm/board/common/board_common.mk
+@@ -19,7 +19,7 @@ endif
+ endif
+ 
+ # To compile with highest log level (VERBOSE) set value to 50
+-LOG_LEVEL := 40
++LOG_LEVEL := 0
+ 
+ # Use custom generic timer clock
+ ifneq (${GENTIMER_ACTUAL_CLOCK},)

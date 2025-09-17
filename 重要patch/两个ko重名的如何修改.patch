@@ -1,0 +1,59 @@
+报错信息：
+error: the following would cause module name conflict:
+  drivers/input/touchscreen/FT8201AB/focaltech_tp.ko
+  drivers/input/touchscreen/focaltech_touch/focaltech_tp.ko
+make[1]: *** [/mnt/disk1/Code/MT87xx_S0.mp1/kernel-5.10/Makefile:1531: modules_check] Error 1
+make[1]: *** Waiting for unfinished jobs....
+
+
+解决方式：
+改变其中一个编译为ko的名称
+
+
+
+diff --git a/device/emdoor/t8123_l40mmeiw_T122_64/ko_order_table.csv b/device/emdoor/t8123_l40mmeiw_T122_64/ko_order_table.csv
+index 6e48915e61b..1d79060f1d3 100755
+--- a/device/emdoor/t8123_l40mmeiw_T122_64/ko_order_table.csv
++++ b/device/emdoor/t8123_l40mmeiw_T122_64/ko_order_table.csv
+@@ -322,7 +322,7 @@ task_turbo.ko,/drivers/misc/mediatek/task_turbo/task_turbo.ko,vendor,Y,N,user/us
+ pmsr.ko,/drivers/misc/mediatek/pmsr/pmsr.ko,vendor,Y,N,user/userdebug/eng
+ spmtwam.ko,/drivers/misc/mediatek/pmsr/twam/spmtwam.ko,vendor,Y,N,user/userdebug/eng
+ mtk_disp_sec.ko,/drivers/gpu/drm/mediatek/mediatek_v2/mtk_disp_sec.ko,vendor,Y,N,user/userdebug/eng
+-focaltech_tp.ko,/drivers/input/touchscreen/focaltech_touch/focaltech_tp.ko,ramdisk,Y,N,user/userdebug/eng
++focaltech_tp_fts8210p.ko,/drivers/input/touchscreen/focaltech_touch/focaltech_tp_fts8210p.ko,ramdisk,Y,N,user/userdebug/eng
+ sec.ko,/drivers/misc/mediatek/masp/sec.ko,vendor,Y,Y,user/userdebug/eng
+ switch_pogo.ko,/drivers/misc/mediatek/pogo/switch_pogo.ko,vendor,Y,N,user/userdebug/eng
+ switch_hall.ko,/drivers/input/misc/switch_hall.ko,vendor,Y,N,user/userdebug/eng
+diff --git a/kernel-5.10/drivers/input/touchscreen/focaltech_touch/Makefile b/kernel-5.10/drivers/input/touchscreen/focaltech_touch/Makefile
+index 0c31067c77d..31142bf65f4 100644
+--- a/kernel-5.10/drivers/input/touchscreen/focaltech_touch/Makefile
++++ b/kernel-5.10/drivers/input/touchscreen/focaltech_touch/Makefile
+@@ -3,8 +3,8 @@
+ 
+ ccflags-$(CONFIG_DRM_MEDIATEK_V2) += -I$(srctree)/drivers/gpu/drm/mediatek/mediatek_v2/
+ 
+-obj-$(CONFIG_TOUCHSCREEN_FTS_I2C) += focaltech_tp.o
+-focaltech_tp-y := focaltech_core.o \
++obj-$(CONFIG_TOUCHSCREEN_FTS_I2C) += focaltech_tp_fts8210p.o
++focaltech_tp_fts8210p-y := focaltech_core.o \
+ 		focaltech_ex_fun.o \
+ 		focaltech_ex_mode.o \
+ 		focaltech_gesture.o \
+@@ -14,12 +14,12 @@ focaltech_tp-y := focaltech_core.o \
+ 
+ 
+ 
+-focaltech_tp-y += focaltech_i2c.o
++focaltech_tp_fts8210p-y += focaltech_i2c.o
+ 
+ 
+ 
+ 
+ 
+ 
+-focaltech_tp-y += focaltech_flash.o
+-focaltech_tp-y += focaltech_flash/focaltech_upgrade_ft8201p.o
+\ No newline at end of file
++focaltech_tp_fts8210p-y += focaltech_flash.o
++focaltech_tp_fts8210p-y += focaltech_flash/focaltech_upgrade_ft8201p.o
+\ No newline at end of file

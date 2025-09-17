@@ -1,0 +1,65 @@
+diff --git a/kernel-5.10/drivers/power/supply/mtk_battery.c b/kernel-5.10/drivers/power/supply/mtk_battery.c
+index d70514b9800..1fe006b4360 100644
+--- a/kernel-5.10/drivers/power/supply/mtk_battery.c
++++ b/kernel-5.10/drivers/power/supply/mtk_battery.c
+@@ -970,6 +970,10 @@ int force_get_tbat_internal(struct mtk_battery *gm, bool update)
+ 
+ int force_get_tbat(struct mtk_battery *gm, bool update)
+ {
++       bm_debug("[%s] fixed TBAT NTC=25 t\n", __func__);
++       gm->cur_bat_temp = 25;
++       return gm->cur_bat_temp;
++/*
+        int bat_temperature_val = 0;
+ 
+        if (gm->is_probe_done == false) {
+@@ -990,6 +994,7 @@ int force_get_tbat(struct mtk_battery *gm, bool update)
+        gm->cur_bat_temp = bat_temperature_val;
+ 
+        return bat_temperature_val;
++*/
+ }
+ 
+ /* ============================================================ */
+diff --git a/kernel-5.10/drivers/power/supply/mtk_charger.c b/kernel-5.10/drivers/power/supply/mtk_charger.c
+index b36171fd97b..3f50be2f34a 100644
+--- a/kernel-5.10/drivers/power/supply/mtk_charger.c
++++ b/kernel-5.10/drivers/power/supply/mtk_charger.c
+@@ -3576,8 +3576,9 @@ int psy_charger_set_property(struct power_supply *psy,
+                info->chg_data[CHG2_SETTING].thermal_charging_current_limit = -1;
+                break;
+        case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT:
+-               info->chg_data[idx].thermal_input_current_limit =
+-                       val->intval;
++               pr_err("get thermal_aicr=%d\n", val->intval);
++               info->chg_data[idx].thermal_input_current_limit = -1;
++                       // val->intval;
+                break;
+        case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT:
+                if (val->intval > 0)
+diff --git a/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/common/battery/mtk_battery.c b/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/common/battery/mtk_battery.c
+index 3e6d6c01a1e..11f86f43fff 100644
+--- a/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/common/battery/mtk_battery.c
++++ b/vendor/mediatek/proprietary/bootable/bootloader/lk2/platform/mediatek/common/battery/mtk_battery.c
+@@ -282,6 +282,10 @@ int force_get_tbat(bool update)
+     if (is_disable_bat())
+         return DEFAULT_BATTEMP;
+ 
++#if 1
++    return 25;
++#endif
++
+     if (update == true || pre_bat_temper_val == -1) {
+         bat_temper_volt = pmic_get_v_bat_temp();
+ 
+diff --git a/vendor/mediatek/proprietary/external/thermal_core_lib/mt6789/thermal.conf b/vendor/mediatek/proprietary/external/thermal_core_lib/mt6789/thermal.conf
+index 48d45c926d4..11dcaf27b77 100644
+--- a/vendor/mediatek/proprietary/external/thermal_core_lib/mt6789/thermal.conf
++++ b/vendor/mediatek/proprietary/external/thermal_core_lib/mt6789/thermal.conf
+@@ -31,4 +31,4 @@ limit-state= [1, 2]
+ type= SKIN
+ sensor= ap_ntc
+ level= [severe, critical, emergency, shutdown]
+-threshold= [47000, 56000, 58000, 80000]
+\ No newline at end of file
++threshold= [47000, 56000, 58000, 200000]

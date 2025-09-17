@@ -1,0 +1,213 @@
+diff --git a/longan/bsp/drivers/power/supply/axp515_usb_power.c b/longan/bsp/drivers/power/supply/axp515_usb_power.c
+index 43602ecdede..d85c2a0d221 100644
+--- a/longan/bsp/drivers/power/supply/axp515_usb_power.c
++++ b/longan/bsp/drivers/power/supply/axp515_usb_power.c
+@@ -38,6 +38,7 @@
+ #include <linux/pinctrl/consumer.h>
+ #include "axp515_charger.h"
+ 
++static struct power_supply_desc axp515_usb_desc;
+ unsigned int reg_addr[] = {
+     0x00, 0x01, 0x02, 0x04, 0x05, 0x06, 0x10, 0x11,
+     0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x20,
+@@ -55,6 +56,8 @@ struct axp515_usb_power {
+ 	struct wakeup_source	  *vbus_input_check;
+ 	atomic_t                  set_current_limit;
+ 	atomic_t                  current_limit_sets;
++	int 						force_detect_count;
++    struct 						delayed_work charge_detect_recheck_delay_work;
+ 
+ 	/* battery_power_supply */
+ 	bool                      battery_supply_exist;
+@@ -351,6 +354,8 @@ static int axp515_set_iin_limit(struct regmap *regmap, int mA)
+ 	unsigned int data;
+ 	int ret = 0, reg_val;
+ 
++	printk("kyle current = %d\n", mA);
++
+ 	data = mA;
+ 	if (data > 3250)
+ 		data = 3250;
+@@ -372,6 +377,69 @@ static int axp515_set_iin_limit(struct regmap *regmap, int mA)
+ 	return 0;
+ }
+ 
++static int axp515_get_type(struct power_supply *ps)
++{
++	struct axp515_usb_power *usb_power = power_supply_get_drvdata(ps);
++	struct regmap *regmap = usb_power->regmap;
++	int data = 0;
++
++	mdelay(100);
++	regmap_update_bits(regmap, AXP515_AUTO_SETS, BIT(7), BIT(7));
++	mdelay(300);
++
++	regmap_read(regmap, 0x01, &data);
++	printk("kyle get type =0x%x\n",data);
++
++	int top_three_bits = (data >> 5) & 0x07;
++    printk("kyle top three bits =0x%x\n", top_three_bits);
++
++	if (top_three_bits == 0x1) {
++		printk("kyle SDP\n");
++		axp515_usb_desc.type = POWER_SUPPLY_TYPE_USB;
++		axp515_set_iin_limit(regmap, 500);
++	} else if (top_three_bits == 0x0) {
++		printk("kyle unknown \n");
++		axp515_usb_desc.type = POWER_SUPPLY_TYPE_UNKNOWN;
++		axp515_set_iin_limit(regmap, 0);
++	} else {
++		printk("kyle DCP \n");
++		axp515_usb_desc.type = POWER_SUPPLY_TYPE_USB_DCP;
++		axp515_set_iin_limit(regmap, 2000);
++	}
++
++	if (axp515_usb_desc.type != POWER_SUPPLY_TYPE_USB_DCP && usb_power->force_detect_count == 0) {
++        printk("kyle axp515 retry get type\n");
++		usb_power->force_detect_count = 1;
++		printk("%s: kyle force_detect_count: %d\n", __func__, usb_power->force_detect_count);
++        schedule_delayed_work(&usb_power->charge_detect_recheck_delay_work,
++                              msecs_to_jiffies(500));
++    }
++
++
++	return 0;
++}
++
++static void charge_detect_recheck_delay_work_func(struct work_struct *work)
++{
++    struct axp515_usb_power *usb_power = container_of(work,
++                                        struct axp515_usb_power,
++                                        charge_detect_recheck_delay_work.work);
++    int ret;
++
++    if (!usb_power->usb_supply) {
++        printk("%s: usb_supply not good\n", __func__);
++        return;
++    }
++	printk("kyle--ercishibie\n");
++    ret = axp515_get_type(usb_power->usb_supply);
++    if (ret) {
++        printk("%s: retry get type failed(%d)\n", __func__, ret);
++        return;
++    }
++
++    power_supply_changed(usb_power->usb_supply);
++}
++
+ static int axp515_set_vindpm(struct regmap *regmap, int mV)
+ {
+ 	unsigned int data;
+@@ -486,7 +554,7 @@ static int axp515_usb_set_property(struct power_supply *psy,
+ 		}
+ 
+ 		atomic_set(&usb_power->current_limit_sets, usb_cur);
+-		ret = axp515_set_iin_limit(regmap, usb_cur);
++		// ret = axp515_set_iin_limit(regmap, usb_cur);
+ 		break;
+ 	case POWER_SUPPLY_PROP_SCOPE:
+ 		ret = axp515_set_cc_status(psy, val->intval);
+@@ -526,7 +594,7 @@ const enum power_supply_usb_type axp515_usb_types_array[] = {
+     POWER_SUPPLY_USB_TYPE_DCP,
+ };
+ 
+-static const struct power_supply_desc axp515_usb_desc = {
++static struct power_supply_desc axp515_usb_desc = {
+ 	.name = "axp515-usb",
+ 	.type = POWER_SUPPLY_TYPE_USB,
+ 	.usb_types = axp515_usb_types_array,
+@@ -612,7 +680,7 @@ static void axp515_irq_limit_input_process(struct axp515_usb_power *usb_power)
+ 
+ 	if (!axp_config->pmu_bc12_en) {
+ 		if (!axp515_check_acin(usb_power)) {
+-			axp515_set_iin_limit(usb_power->regmap, axp_config->pmu_usbpc_cur);
++			// axp515_set_iin_limit(usb_power->regmap, axp_config->pmu_usbpc_cur);
+ 			cancel_delayed_work_sync(&usb_power->usb_chg_state);
+ 			__pm_stay_awake(usb_power->vbus_input_check);
+ 			schedule_delayed_work(&usb_power->usb_chg_state, msecs_to_jiffies(5 * 1000));
+@@ -633,7 +701,7 @@ static void axp515_typec_iin_limit_check(struct axp515_usb_power *usb_power, int
+ 
+ 		if (axp515_check_acin(usb_power)) {
+ 			if (limit_cur_now != axp_config->pmu_usbad_cur) {
+-				axp515_set_iin_limit(usb_power->regmap, axp_config->pmu_usbad_cur);
++				// axp515_set_iin_limit(usb_power->regmap, axp_config->pmu_usbad_cur);
+ 			}
+ 			continue;
+ 		}
+@@ -641,13 +709,13 @@ static void axp515_typec_iin_limit_check(struct axp515_usb_power *usb_power, int
+ 		limit_cur_sets = atomic_read(&usb_power->current_limit_sets);
+ 		if (limit_cur_sets) {
+ 			if (limit_cur_old != limit_cur_sets) {
+-				axp515_set_iin_limit(usb_power->regmap, limit_cur_sets);
++				// axp515_set_iin_limit(usb_power->regmap, limit_cur_sets);
+ 			}
+ 			continue;
+ 		}
+ 
+ 		if (limit_cur_old != limit_cur_now) {
+-			axp515_set_iin_limit(usb_power->regmap, limit_cur_old);
++			// axp515_set_iin_limit(usb_power->regmap, limit_cur_old);
+ 			break;
+ 		}
+ 		mdelay(10);
+@@ -664,7 +732,11 @@ static irqreturn_t axp515_irq_handler_usb_in(int irq, void *data)
+ 
+ 	mdelay(50);
+ 
++	usb_power->force_detect_count = 0;
++	printk("%s: kyle force_detect_count: %d\n", __func__, usb_power->force_detect_count);
++
+ 	atomic_notifier_call_chain(&usb_power_notifier_list, 1, NULL);
++	axp515_get_type(usb_power->usb_supply);
+ 	power_supply_changed(usb_power->usb_supply);
+ 
+ 	if (!axp515_check_battery(usb_power))
+@@ -776,13 +848,13 @@ static void axp515_usb_set_current_fsm(struct work_struct *work)
+ {
+ 	struct axp515_usb_power *usb_power =
+ 		container_of(work, typeof(*usb_power), usb_chg_state.work);
+-	struct axp_config_info *axp_config = &usb_power->dts_info;
++	// struct axp_config_info *axp_config = &usb_power->dts_info;
+ 	int limit_cur;
+ 
+ 	if (atomic_read(&usb_power->set_current_limit)) {
+ 		PMIC_INFO("current limit setted: usb pc type\n");
+ 	} else {
+-		axp515_set_iin_limit(usb_power->regmap, axp_config->pmu_usbad_cur);
++		// axp515_set_iin_limit(usb_power->regmap, axp_config->pmu_usbad_cur);
+ 		PMIC_INFO("current limit not set: usb adapter type\n");
+ 	}
+ 	limit_cur = _axp515_get_iin_limit(usb_power);
+@@ -824,7 +896,7 @@ static void axp515_usb_det_monitor(struct work_struct *work)
+ 			regmap_update_bits(usb_power->regmap, AXP515_CC_MODE_CTRL, 0x03, 0x03);
+ 			limit_cur = _axp515_get_iin_limit(usb_power);
+ 			if (limit_cur_old != limit_cur) {
+-				axp515_set_iin_limit(usb_power->regmap, limit_cur_old);
++				// axp515_set_iin_limit(usb_power->regmap, limit_cur_old);
+ 				PMIC_DEBUG("old_input_cur:%d, now_input_cur:%d\n", limit_cur_old, limit_cur);
+ 			}
+ 		}
+@@ -941,8 +1013,10 @@ static void axp515_usb_power_init(struct axp515_usb_power *usb_power)
+ 		regmap_update_bits(regmap, AXP515_AUTO_SETS, BIT(6), BIT(6));
+ 	} else {
+ 		regmap_update_bits(regmap, AXP515_AUTO_SETS, BIT(6), 0);
+-		if (!axp515_check_battery(usb_power))
+-			axp515_set_iin_limit(usb_power->regmap, dinfo->pmu_usbad_cur);
++		if (!axp515_check_battery(usb_power)){
++
++		}
++			// axp515_set_iin_limit(usb_power->regmap, dinfo->pmu_usbad_cur);
+ 	}
+ }
+ 
+@@ -1041,6 +1115,10 @@ static int axp515_usb_probe(struct platform_device *pdev)
+ 		goto err;
+ 	}
+ 
++	usb_power->force_detect_count = 0;
++	printk("%s: kyle force_detect_count: %d\n", __func__, usb_power->force_detect_count);
++	INIT_DELAYED_WORK(&usb_power->charge_detect_recheck_delay_work, charge_detect_recheck_delay_work_func);
++
+ 	usb_power->name = "axp515_usb";
+ 	usb_power->dev = &pdev->dev;
+ 	usb_power->regmap = axp_dev->regmap;

@@ -1,0 +1,137 @@
+diff --git a/longan/bsp/drivers/power/supply/axp515_usb_power.c b/longan/bsp/drivers/power/supply/axp515_usb_power.c
+index a0fbf0a3ead..353f6af439b 100644
+--- a/longan/bsp/drivers/power/supply/axp515_usb_power.c
++++ b/longan/bsp/drivers/power/supply/axp515_usb_power.c
+@@ -38,6 +38,12 @@
+ #include <linux/pinctrl/consumer.h>
+ #include "axp515_charger.h"
+ 
++// int mmi_charge_enable_flag = 0;
++// EXPORT_SYMBOL(mmi_charge_enable_flag);
++int mmi_charge_enable_all_flag = 0;
++EXPORT_SYMBOL(mmi_charge_enable_all_flag);
++
++static struct power_supply_desc axp515_usb_desc;
+ struct axp515_usb_power {
+ 	char                      *name;
+ 	struct device             *dev;
+@@ -234,11 +240,21 @@ static int axp515_get_usb_type(struct power_supply *ps,
+ 				   union power_supply_propval *val)
+ {
+ 	struct axp515_usb_power *usb_power = power_supply_get_drvdata(ps);
++	struct regmap *regmap = usb_power->regmap;
++	int data = 0;
++	
++	regmap_update_bits(regmap, AXP515_AUTO_SETS, BIT(7), BIT(7));
++	mdelay(200);
++
++	regmap_read(regmap, 0x01, &data);	//从寄存器 0x01 中读取值，并将其存储到变量 data 中
++	printk("kyle get type =0x%x\n",data);
+ 
+ 	if (atomic_read(&usb_power->set_current_limit)) {
+ 		val->intval = POWER_SUPPLY_USB_TYPE_SDP;
++		axp515_usb_desc.type = POWER_SUPPLY_TYPE_USB;
+ 	} else {
+ 		val->intval = POWER_SUPPLY_USB_TYPE_DCP;
++		axp515_usb_desc.type = POWER_SUPPLY_TYPE_USB_DCP;
+ 	}
+ 
+ 	return 0;
+@@ -363,6 +379,7 @@ static int axp515_set_iin_limit(struct regmap *regmap, int mA)
+ 	if (ret < 0)
+ 		return ret;
+ 
++	printk("kyle set aicl = %d data = %d\n",mA,data);
+ 	return 0;
+ }
+ 
+@@ -370,21 +387,71 @@ static int axp515_set_vindpm(struct regmap *regmap, int mV)
+ {
+ 	unsigned int data;
+ 	int ret = 0;
++	int dttt1 = 0;
++	int dttt2 = 0;
+ 
+ 	data = mV;
+-
++	PMIC_INFO("zxf %s data1: %d\n", __func__, data);
+ 	if (data > 5080)
+ 		data = 5080;
+ 	if	(data < 3880)
+ 		data = 3880;
+ 	data = ((data - 3880) / 80);
++	PMIC_INFO("zxf %s data2: %d\n", __func__, data);
++
++	regmap_read(regmap, 0x11, &dttt1);
++	printk("zxf1 get type =0x%x\n",dttt1);
++
+ 	ret = regmap_update_bits(regmap, AXP515_RBFET_SET, GENMASK(3, 0),
+ 				 data);
++
++	regmap_read(regmap, 0x11, &dttt2);
++	printk("zxf2 get type =0x%x\n",dttt2);
++	PMIC_INFO("zxf %s ret: %d\n", __func__, ret);
+ 	if (ret < 0)
+ 		return ret;
+ 	return 0;
+ }
+ 
++static ssize_t mmi_charge_enable_all_show(
++	struct device *dev, struct device_attribute *attr,
++					char *buf)
++{
++	PMIC_ERR("[zxf mmi_charge_enable_all_show] : %d\n", mmi_charge_enable_all_flag);
++
++	return sprintf(buf, "%d\n", mmi_charge_enable_all_flag);
++}
++
++static ssize_t mmi_charge_enable_all_store(
++	struct device *dev, struct device_attribute *attr,
++					 const char *buf, size_t size)
++{
++	int ret;
++	struct axp515_usb_power *usb_power = dev_get_drvdata(dev);
++
++	ret = kstrtouint(buf, 0, &mmi_charge_enable_all_flag);
++	if (ret != 0)
++			return -EINVAL;
++	PMIC_ERR("[zxf mmi_charge_enable_all_store] : %d\n", mmi_charge_enable_all_flag);
++
++	if (mmi_charge_enable_all_flag) {
++        // 停止充电
++		PMIC_INFO("zxf disable charge\n");
++		// regmap_update_bits(usb_power->regmap, AXP515_IPRECHG_CFG, BIT(7), 0);
++		axp515_set_vindpm(usb_power->regmap, 6000);
++    } else {
++        // 恢复充电
++        PMIC_INFO("zxf enable charge\n");
++		// regmap_update_bits(usb_power->regmap, AXP515_IPRECHG_CFG, BIT(7), BIT(7));
++		axp515_set_vindpm(usb_power->regmap, 4360);
++
++    }
++
++	power_supply_changed(usb_power->usb_supply);
++	return size;
++}
++static DEVICE_ATTR_RW(mmi_charge_enable_all);
++
+ static int axp515_set_cc_status(struct power_supply *ps, int type)
+ {
+ 	struct axp515_usb_power *usb_power = power_supply_get_drvdata(ps);
+@@ -520,7 +587,7 @@ const enum power_supply_usb_type axp515_usb_types_array[] = {
+     POWER_SUPPLY_USB_TYPE_DCP,
+ };
+ 
+-static const struct power_supply_desc axp515_usb_desc = {
++static struct power_supply_desc axp515_usb_desc = {
+ 	.name = "axp515-usb",
+ 	.type = POWER_SUPPLY_TYPE_USB,
+ 	.usb_types = axp515_usb_types_array,
+@@ -1075,6 +1142,7 @@ static int axp515_usb_probe(struct platform_device *pdev)
+ 	platform_set_drvdata(pdev, usb_power);
+ 
+ 	device_create_file(&pdev->dev, &dev_attr_ship_mode);
++	device_create_file(&pdev->dev, &dev_attr_mmi_charge_enable_all);
+ 
+ 	return ret;
+ 
