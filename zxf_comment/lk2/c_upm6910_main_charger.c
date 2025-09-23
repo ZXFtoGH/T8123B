@@ -537,7 +537,7 @@ static int upm6910_main_init_device(void)
 {
     //upm6910_main_set_en_jeita(0);   /* Disable jeita */
     upm6910_main_set_en_hiz(0x0);
-    upm6910_main_set_mivr(0x7);      /* VIN DPM check 4.6V */
+    upm6910_main_set_mivr(0x7);      /* VAC_OVP 14V */
     upm6910_main_set_wdt_rst(0x1);   /* Kick watchdog */
     upm6910_main_set_sys_min(0x5);   /* Minimum system voltage 3.5V */
     upm6910_main_set_iprechg(0xC);   /* Precharge current 720mA */
