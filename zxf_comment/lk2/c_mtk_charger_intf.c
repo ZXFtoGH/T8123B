@@ -29,6 +29,13 @@
 
 #define LOCAL_TRACE 0
 
+/*
+__WEAK 是一个编译器属性，表示这是一个弱定义
+
+如果其他地方有同名函数的强定义，链接器会优先使用强定义
+
+如果没有强定义，就使用这个弱定义
+*/
 int __WEAK mtk_charger_init(void)
 {
     LTRACEF("%s: not ready\n", __func__);
