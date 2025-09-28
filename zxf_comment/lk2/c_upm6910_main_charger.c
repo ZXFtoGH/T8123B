@@ -7,6 +7,7 @@
 控制充电启停、看门狗复位、MIVR（最小输入电压调节）
 支持多充电器架构（MULTI_EXT_MAIN_CHARGER 宏定义）
 ⚠️ 运行环境：Bootloader（LK）阶段，不依赖完整操作系统。
+可参考pl阶段的解释，基本是重复的
 */
 #include <bits.h>
 #include <debug.h>
