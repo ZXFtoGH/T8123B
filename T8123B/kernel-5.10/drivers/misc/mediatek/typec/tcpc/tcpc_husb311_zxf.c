@@ -12,6 +12,60 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License for more details.
  */
+
+
+ /*
+ *插拔事件是如何检测和调用的
+ 完整调用链：
+
+ 硬件中断
+    ↓
+husb311_intr_handler()          [中断顶部]
+    ↓
+kthread_queue_work()
+    ↓
+husb311_irq_work_handler()      [工作队列]
+    ↓
+tcpci_alert()                   [TCPC核心]
+    ↓
+husb311_get_cc()                [读取CC状态]
+    ↓  
+tcpci_alert_vendor_defined()    [厂商特定处理]
+    ↓
+tcpc_typec_handle_cc_change()   [Type-C状态机]
+    ↓
+tcpm_typec_handle_cc_change()   [TCPM管理]
+    ↓
+用户空间通知
+
+
+插入检测流程
+初始状态: CC1=开路, CC2=开路
+    ↓ 插入Type-C线缆
+硬件: CC引脚电压变化 → 产生中断
+软件: 读取CC状态 → CC1=Rd(0.4V), CC2=开路
+    ↓
+判断: Sink设备连接, 极性=CC1
+    ↓
+状态机: 未连接 → 已连接
+    ↓
+通知: 用户空间uevent
+
+
+
+拔出检测流程
+当前状态: CC1=Rd, CC2=开路
+    ↓ 拔出Type-C线缆
+硬件: CC引脚电压变化 → 产生中断  
+软件: 读取CC状态 → CC1=开路, CC2=开路
+    ↓
+判断: 连接断开
+    ↓
+状态机: 已连接 → 未连接
+    ↓  
+通知: 用户空间uevent
+ *  
+ */
 #define DEBUG
 #include <linux/init.h>
 #include <linux/module.h>
@@ -72,6 +126,25 @@ struct husb311_chip {
 	int chip_id;
 };
 
+/*
+这些宏调用是 RT-Regmap（Real-Time Register Map）框架 的声明语句，用于在 Linux 内核驱动中定义一组可被 RT-Regmap 管理的寄存器
+RT-Regmap 是一种常用于电源管理芯片（如 TCPC、充电 IC、PMIC）的寄存器抽象层，支持：
+
+自动缓存（cache）、
+原子访问、
+debugfs 可视化、
+批量读写、
+权限控制（volatile/read-only 等）
+
+宏解析：RT_REG_DECL
+RT_REG_DECL(reg_name, size, flags, ...)
+参数	说明
+reg_name	寄存器名称（通常为芯片 datasheet 中的寄存器地址符号）
+size	寄存器宽度（单位：字节），如 2 表示 16 位（2 字节）
+flags	属性标志，如 RT_VOLATILE 表示该寄存器值可能被硬件异步修改，不应缓存
+...	可选附加参数（如默认值、回调函数等），此处为空 {}
+💡 RT_REG_DECL 最终会被展开为一个 struct rt_reg_data 数组元素，供 rt_regmap_device_register() 使用。
+*/
 #if IS_ENABLED(CONFIG_RT_REGMAP)
 RT_REG_DECL(TCPC_V10_REG_VID, 2, RT_VOLATILE, {});
 RT_REG_DECL(TCPC_V10_REG_PID, 2, RT_VOLATILE, {});
@@ -175,6 +248,16 @@ static const rt_register_map_t husb311_chip_regmap[] = {
 //static int husb311_retransmit(struct tcpc_device *tcpc);
 //static int husb311_set_intrst(struct tcpc_device *tcpc, bool en);
 
+/*这两个函数是RegMap系统的底层硬件访问接口，负责实际的I2C通信
+自动重试机制（最多 5 次）
+操作耗时测量与日志打印（微秒级）
+失败时短延时后重试（100μs）
+
+client: I2C客户端指针
+reg: 要读取的寄存器地址
+len: 要读取的字节数
+dst: 存储读取数据的缓冲区
+*/
 static int husb311_read_device(void *client, u32 reg, int len, void *dst)
 {
 	struct i2c_client *i2c = client;
@@ -196,7 +279,7 @@ static int husb311_read_device(void *client, u32 reg, int len, void *dst)
 	}
 	return ret;
 }
-
+//src: 包含要写入数据的缓冲区
 static int husb311_write_device(void *client, u32 reg, int len, const void *src)
 {
 	struct i2c_client *i2c = client;
@@ -219,6 +302,11 @@ static int husb311_write_device(void *client, u32 reg, int len, const void *src)
 	return ret;
 }
 
+/*
+单字节寄存器访问
+寄存器读取 (husb311_reg_read)
+寄存器写入 (husb311_reg_write)
+*/
 static int husb311_reg_read(struct i2c_client *i2c, u8 reg)
 {
 	struct husb311_chip *chip = i2c_get_clientdata(i2c);
@@ -252,6 +340,11 @@ static int husb311_reg_write(struct i2c_client *i2c, u8 reg, const u8 data)
 	return ret;
 }
 
+/*
+多字节块访问
+块读取 (husb311_block_read)
+块写入 (husb311_block_write)
+*/
 static int husb311_block_read(struct i2c_client *i2c,
 			u8 reg, int len, void *dst)
 {
@@ -282,6 +375,17 @@ static int husb311_block_write(struct i2c_client *i2c,
 	return ret;
 }
 
+/*
+[Type-C核心层] ← husb311_i2c_read8/16(), husb311_i2c_write8/16()
+        ↓
+[字访问层] ← husb311_read_word(), husb311_write_word()
+        ↓  
+[寄存器访问层] ← husb311_reg_read(), husb311_block_read()
+        ↓
+[实现选择层] ← RT-RegMap 或 直接I2C
+        ↓
+[硬件层] ← I2C总线
+*/
 static int32_t husb311_write_word(struct i2c_client *client,
 					uint8_t reg_addr, uint16_t data)
 {
@@ -420,9 +524,19 @@ static int husb311_regmap_deinit(struct husb311_chip *chip)
 	return 0;
 }
 
+/*
+这段代码定义了两个 HUSB311 芯片的关键操作函数：软件复位（husb311_software_reset）和命令发送（husb311_command）。
+它们是驱动与硬件交互的基础接口，尤其在 USB Type-C/PD 协议栈中频繁使用。
+*/
+/*
+典型调用时机：
+驱动初始化（husb311_tcpc_init）
+PD 通信严重错误恢复
+系统 resume 后重新初始化
+*/
 static inline int husb311_software_reset(struct tcpc_device *tcpc)
 {
-	int ret = husb311_i2c_write8(tcpc, HUSB311_REG_SWRESET, 1);
+	int ret = husb311_i2c_write8(tcpc, HUSB311_REG_SWRESET, 1);	//向 HUSB311_REG_SWRESET 寄存器写入 1，触发芯片内部 软件复位（Soft Reset）
 #if IS_ENABLED(CONFIG_RT_REGMAP)
 	struct husb311_chip *chip = tcpc_get_dev_data(tcpc);
 #endif /* CONFIG_RT_REGMAP */
@@ -430,17 +544,39 @@ static inline int husb311_software_reset(struct tcpc_device *tcpc)
 	if (ret < 0)
 		return ret;
 #if IS_ENABLED(CONFIG_RT_REGMAP)
-	rt_regmap_cache_reload(chip->m_dev);
+	rt_regmap_cache_reload(chip->m_dev);	//清空并重新加载 RT-Regmap 的寄存器缓存，软件复位后，所有寄存器值已重置为默认值，但 RT-Regmap 可能仍缓存旧值。若不清除缓存，后续读取会返回错误数据。
 #endif /* CONFIG_RT_REGMAP */
 	usleep_range(1000, 2000);
 	return 0;
 }
 
+/*
+husb311_command —— 发送 TCPC 标准命令
+符合 USB Type-C Port Controller Interface Specification (TCPCI) v1.0/v1.1/v2.0
+✅ 常见 cmd 值（来自 TCPCI spec）：
+命令	说明
+TCPC_CMD_WAKE_I2C	唤醒 I²C 接口（用于 runtime PM）
+TCPC_CMD_DISABLE_VBUS_DETECT	禁用 VBUS 检测
+TCPC_CMD_ENABLE_VBUS_DETECT	启用 VBUS 检测
+TCPC_CMD_DISABLE_SINK_VBUS	关闭 Sink VBUS（放电）
+TCPC_CMD_LOOK4CONNECTION	开始检测连接（DRP toggle）
+TCPC_CMD_RXONEMORE	接收额外一个 PD 消息（用于 CRC 错误恢复）
+💡 HUSB311 作为 TCPC，必须支持这些标准命令以兼容 TCPM（Type-C Policy Manager）子系统
+*/
 static inline int husb311_command(struct tcpc_device *tcpc, uint8_t cmd)
 {
 	return husb311_i2c_write8(tcpc, TCPC_V10_REG_COMMAND, cmd);
 }
 
+/*
+重要性总结
+VBUS校准: 确保电压检测精度，防止误触发
+警报掩码: 控制中断源，避免不必要的CPU唤醒
+电源掩码: 专注关键电源状态变化
+故障掩码: 保护硬件免受损坏
+实时掩码: 支持高级电源管理功能
+*/
+/*校准VBUS电压检测阈值，确保准确的电压监测。*/
 static int husb311_init_vbus_cal(struct tcpc_device *tcpc)
 {
 	struct husb311_chip *chip = tcpc_get_dev_data(tcpc);
@@ -478,7 +614,7 @@ out:
 
 	return ret;
 }
-
+/*警报掩码初始化 (husb311_init_alert_mask)*/
 static int husb311_init_alert_mask(struct tcpc_device *tcpc)
 {
 	uint16_t mask;
@@ -500,6 +636,7 @@ static int husb311_init_alert_mask(struct tcpc_device *tcpc)
 	return husb311_write_word(chip->client, TCPC_V10_REG_ALERT_MASK, mask);
 }
 
+/*电源状态掩码初始化 (husb311_init_power_status_mask)   只监控VBUS存在状态变化，忽略其他电源状态变化。*/
 static int husb311_init_power_status_mask(struct tcpc_device *tcpc)
 {
 	const uint8_t mask = TCPC_V10_REG_POWER_STATUS_VBUS_PRES;
@@ -507,7 +644,7 @@ static int husb311_init_power_status_mask(struct tcpc_device *tcpc)
 	return husb311_i2c_write8(tcpc,
 			TCPC_V10_REG_POWER_STATUS_MASK, mask);
 }
-
+/*故障掩码初始化 (husb311_init_fault_mask)   监控VCONN相关的故障条件*/
 static int husb311_init_fault_mask(struct tcpc_device *tcpc)
 {
 	const uint8_t mask =
@@ -517,7 +654,7 @@ static int husb311_init_fault_mask(struct tcpc_device *tcpc)
 	return husb311_i2c_write8(tcpc,
 			TCPC_V10_REG_FAULT_STATUS_MASK, mask);
 }
-
+/*实时掩码初始化 (husb311_init_rt_mask)*/
 static int husb311_init_rt_mask(struct tcpc_device *tcpc)
 {
 	uint8_t rt_mask = 0;
@@ -794,6 +931,27 @@ init_alert_err:
 	return -EINVAL;
 }
 
+/*
+总结：三个函数的协同作用
+函数	作用层级	协议关联	功耗影响
+alert_status_clear	中断管理	TCPCI 标准 + 厂商扩展	无
+set_clock_gating	电源管理	无（芯片私有）	⭐ 显著降低待机功耗
+init_cc_params	PD 物理层	USB PD BMC 编码	无（提升可靠性）
+*/
+/*警报状态清除函数 (husb311_alert_status_clear)
+功能概述
+清除芯片的中断状态标志，采用"写1清除"机制。
+
+在 TCPCI 规范中，ALERT 寄存器是 写 1 清零（Write-1-to-Clear）：
+若某位为 1，表示对应事件发生（如 CC_STATUS 变化）
+向该位写 1，即可清除中断标志
+写 0 无影响
+
+设计特点
+分层处理: 32位mask分成16位+8位分别处理
+条件编译: 只在支持VSafe0V检测时编译实时警报部分
+错误传播: 任何操作失败立即返回
+*/
 int husb311_alert_status_clear(struct tcpc_device *tcpc, uint32_t mask)
 {
 	int ret;
@@ -822,7 +980,15 @@ int husb311_alert_status_clear(struct tcpc_device *tcpc, uint32_t mask)
 
 	return 0;
 }
+/*时钟门控函数 (husb311_set_clock_gating)
+功能概述
+控制芯片内部时钟的门控，以优化功耗
 
+HUSB311 内部有多个时钟域：
+CK_24M：主时钟（24MHz）
+PCLK：外设时钟
+BCLK / BCLK2：BMC（Biphase Mark Coding，PD 通信）相关时钟
+CK_300K / CK_600K：低频时钟（用于 idle 状态）*/
 static int husb311_set_clock_gating(struct tcpc_device *tcpc, bool en)
 {
 	int ret = 0;
@@ -851,8 +1017,14 @@ static int husb311_set_clock_gating(struct tcpc_device *tcpc, bool en)
 	return ret;
 }
 
-static inline int husb311_init_cc_params(
-			struct tcpc_device *tcpc, uint8_t cc_res)
+/*CC参数初始化函数 (husb311_init_cc_params)
+功能概述
+根据CC电阻值配置BMCIO（BMC I/O）参数，优化PD通信。
+这个功能与PD协议中的GoodCRC处理相关：
+在某些PD协商场景下，sink设备可能不回复GoodCRC
+通过BMCIO配置优化这种情况下的通信可靠性
+不同的CC电阻值需要不同的优化参数*/
+static inline int husb311_init_cc_params(struct tcpc_device *tcpc, uint8_t cc_res)
 {
 	int rv = 0;
 
@@ -861,10 +1033,10 @@ static inline int husb311_init_cc_params(
 	uint8_t en, sel;
 	//struct husb311_chip *chip = tcpc_get_dev_data(tcpc);
 
-	if (cc_res == TYPEC_CC_VOLT_SNK_DFT) {	/* 0.55 */
+	if (cc_res == TYPEC_CC_VOLT_SNK_DFT) {	/* 0.55 TYPEC_CC_VOLT_SNK_DFT (0.55V): 默认sink，禁用特殊配置*/
 		en = 0;
 		sel = 0x81;
-	//} else if (chip->chip_id >= RT1715_DID_D) {	/* 0.35 & 0.75 */
+	//} else if (chip->chip_id >= RT1715_DID_D) {	/* 0.35 & 0.75 说明此驱动可能 复用自 RT1715 芯片，HUSB311 是衍生版本 */
 	//	en = 1;
 	//	sel = 0x81;
 	} else {	/* 0.4 & 0.7 */
@@ -881,6 +1053,15 @@ static inline int husb311_init_cc_params(
 	return rv;
 }
 
+/*
+这段代码 husb311_tcpc_init() 是 HUSB311 芯片作为 USB Type-C Port Controller (TCPC) 的初始化函数，在 TCPC 子系统（如 TCPM）探测到设备后调用。其主要任务是：
+
+执行软复位（可选）
+配置 HUSB311 寄存器以满足 USB PD/Type-C 协议要求
+设置角色、滤波、DRP 切换、VCONN 保护等关键参数
+初始化中断（Alert）和故障（Fault）掩码
+启用低功耗特性（如时钟门控、Auto Idle）
+*/
 static int husb311_tcpc_init(struct tcpc_device *tcpc, bool sw_reset)
 {
 	int ret;
@@ -952,6 +1133,11 @@ static int husb311_tcpc_init(struct tcpc_device *tcpc, bool sw_reset)
 	return 0;
 }
 
+/*VCONN过压故障处理
+功能： 处理VCONN过压故障，禁用放电使能。
+读取BMC控制寄存器
+清除放电使能位
+写回修改后的值*/
 static inline int husb311_fault_status_vconn_ov(struct tcpc_device *tcpc)
 {
 	int ret;
@@ -964,6 +1150,11 @@ static inline int husb311_fault_status_vconn_ov(struct tcpc_device *tcpc)
 	return husb311_i2c_write8(tcpc, HUSB311_REG_BMC_CTRL, ret);
 }
 
+/*通用故障状态清除
+执行逻辑：
+如果是VCONN过压故障，调用专用处理函数
+写入故障状态寄存器清除所有指定的故障标志
+采用"写1清除"机制*/
 int husb311_fault_status_clear(struct tcpc_device *tcpc, uint8_t status)
 {
 	int ret;
@@ -975,6 +1166,8 @@ int husb311_fault_status_clear(struct tcpc_device *tcpc, uint8_t status)
 	return 0;
 }
 
+/*芯片ID获取函数（已禁用）
+*/
 #if 0
 int husb311_get_chip_id(struct tcpc_device *tcpc, uint32_t *chip_id)
 {
@@ -985,7 +1178,10 @@ int husb311_get_chip_id(struct tcpc_device *tcpc, uint32_t *chip_id)
        return 0;
 }
 #endif
-
+/*警报掩码和状态获取
+分层掩码组合：
+低16位: 标准TCPC警报掩码 (TCPC_V10_REG_ALERT_MASK)
+高16位: HUSB311实时掩码 (HUSB311_REG_HT_MASK)*/
 int husb311_get_alert_mask(struct tcpc_device *tcpc, uint32_t *mask)
 {
 	int ret;
@@ -1010,7 +1206,8 @@ int husb311_get_alert_mask(struct tcpc_device *tcpc, uint32_t *mask)
 
 	return 0;
 }
-
+/*获取警报状态
+设计模式： 与掩码获取相同的分层结构，确保状态和掩码的位对齐。*/
 int husb311_get_alert_status(struct tcpc_device *tcpc, uint32_t *alert)
 {
 	int ret;
@@ -1035,7 +1232,10 @@ int husb311_get_alert_status(struct tcpc_device *tcpc, uint32_t *alert)
 
 	return 0;
 }
-
+/*获取电源状态
+电源状态位：
+TCPC_REG_POWER_STATUS_VBUS_PRES: VBUS存在状态
+TCPC_REG_POWER_STATUS_EXT_VSAFE0V: VSafe0V状态（通过80%阈值检测）*/
 static int husb311_get_power_status(
 		struct tcpc_device *tcpc, uint16_t *pwr_status)
 {
@@ -1060,7 +1260,7 @@ static int husb311_get_power_status(
 #endif
 	return 0;
 }
-
+/*获取故障状态*/
 int husb311_get_fault_status(struct tcpc_device *tcpc, uint8_t *status)
 {
 	int ret;
@@ -1072,43 +1272,99 @@ int husb311_get_fault_status(struct tcpc_device *tcpc, uint8_t *status)
 	return 0;
 }
 
+/*读取两个CC引脚的状态
+判断当前的角色（Source/Sink）和连接状态
+返回标准的Type-C CC状态码
+
+这个函数是Type-C连接管理的核心，它：
+检测物理连接：通过CC线电压判断
+确定连接方向：识别Source和Sink角色
+支持DRP协商：处理双角色端口切换
+提供极性信息：确定使用CC1还是CC2
+触发状态机：驱动Type-C状态转换
+没有这个函数，系统就无法正确检测和管理Type-C连接，是整个驱动正常运行的基础。
+
+
+典型场景示例
+场景：手机（DRP）插入充电器（Source）
+	DRP Toggle 结束，CC_STATUS:
+	CC1 = Rp（原始值 1）
+	DRP_RESULT = 1（检测到 Rp）
+	act_as_sink = true
+	转换：cc1 = 1 | (1 << 2) = 0b101 → TYPEC_CC_RP_3_0
+	上层得知：对方是 3A Source，可请求 5V/3A
+	调用 init_cc_params(TYPEC_CC_RP_3_0) → 优化接收器
+场景：笔记本（Source）插入 U 盘（Sink）
+	固定角色：ROLE_CTRL = Rp
+	CC_STATUS: CC1 = Rd（原始值 1）
+	act_as_sink = false
+	转换：cc1 = 1 | 0 = 1 → TYPEC_CC_RD
+	上层得知：对方是 Sink，可输出 VBUS*/
 static int husb311_get_cc(struct tcpc_device *tcpc, int *cc1, int *cc2)
 {
 	int status, role_ctrl, cc_role;
 	bool act_as_sink, act_as_drp;
 
-	status = husb311_i2c_read8(tcpc, TCPC_V10_REG_CC_STATUS);
+	status = husb311_i2c_read8(tcpc, TCPC_V10_REG_CC_STATUS);//读取CC状态寄存器，包含CC1和CC2的电压状态
 	if (status < 0)
 		return status;
 
-	role_ctrl = husb311_i2c_read8(tcpc, TCPC_V10_REG_ROLE_CTRL);
+	role_ctrl = husb311_i2c_read8(tcpc, TCPC_V10_REG_ROLE_CTRL);//读取角色控制寄存器，了解当前配置的角色。
 	if (role_ctrl < 0)
 		return role_ctrl;
 
-	if (status & TCPC_V10_REG_CC_STATUS_DRP_TOGGLING) {
+		/*若芯片仍在 DRP Toggle（交替施加 Rp/Rd），说明尚未检测到有效连接
+		返回特殊值 TYPEC_CC_DRP_TOGGLING，告知上层“正在检测中”
+		📌 这是 Type-C DRP 设备的标准行为。*/
+	if (status & TCPC_V10_REG_CC_STATUS_DRP_TOGGLING) {//如果芯片处于DRP（Dual Role Port）切换状态，直接返回切换状态
 		*cc1 = TYPEC_CC_DRP_TOGGLING;
 		*cc2 = TYPEC_CC_DRP_TOGGLING;
 		return 0;
 	}
-
+	//从状态寄存器中提取CC1和CC2的原始电压状态  // 0, 1, 2 → OPEN, Rd, Ra
 	*cc1 = TCPC_V10_REG_CC_STATUS_CC1(status);
 	*cc2 = TCPC_V10_REG_CC_STATUS_CC2(status);
 
-	act_as_drp = TCPC_V10_REG_ROLE_CTRL_DRP & role_ctrl;
-
-	if (act_as_drp) {
+	/*
+	步骤 4：判断当前是作为 Sink 还是 Source
+	这是最关键的逻辑，因为：同样的 CC 电压，在 Sink 和 Source 视角下含义完全不同！
+	*/
+	act_as_drp = TCPC_V10_REG_ROLE_CTRL_DRP & role_ctrl;//检查是否配置为双角色端口
+	if (act_as_drp) {//在DRP模式下（动态角色），从状态寄存器读取当前的实际角色   1 → 检测到 Rp（对方是 Source）→ 自己应作为 Sink       0 → 检测到 Rd（对方是 Sink）→ 自己应作为 Source
 		act_as_sink = TCPC_V10_REG_CC_STATUS_DRP_RESULT(status);
-	} else {
+	} else {//在固定角色模式下，根据配置判断角色。
 		cc_role =  TCPC_V10_REG_CC_STATUS_CC1(role_ctrl);
 		if (cc_role == TYPEC_CC_RP)
-			act_as_sink = false;
+			act_as_sink = false;// 我是 Source（施加 Rp）
 		else
-			act_as_sink = true;
+			act_as_sink = true;// 我是 Sink（施加 Rd）
 	}
 
 	/*
 	 * If status is not open, then OR in termination to convert to
 	 * enum tcpc_cc_voltage_status.
+	 * 将原始电压转换为标准 enum（带 termination 信息）
+	 * Linux 内核中，CC 状态使用 3 位编码：
+		值		含义			说明
+		0b000	TYPEC_CC_OPEN	无连接
+		0b001	TYPEC_CC_RA	音频附件
+		0b010	TYPEC_CC_RD	对方是 Sink（我看到 Rd）
+		0b011	TYPEC_CC_RP_DEF	对方是 Source（默认电流）
+		0b100	TYPEC_CC_RP_1_5	Source（1.5A）
+		0b101	TYPEC_CC_RP_3_0	Source（3.0A）
+		但注意：RD vs RP_xxx 的区分依赖于“我是 Sink 还是 Source”！
+
+		如果 我是 Sink（act_as_sink = true）：
+			看到 Rd → 不可能（自己就是 Rd）
+			看到 Rp → 对方是 Source → 返回 RP_DEF/1.5/3.0
+		如果 我是 Source（act_as_sink = false）：
+			看到 Rd → 对方是 Sink → 返回 RD
+			看到 Ra → 音频附件 → 返回 RA
+		💡 实现技巧：用 bit2 表示 “termination 方向”
+		act_as_sink << 2：
+		若我是 Sink（1）→ 加上 0b100 → 将原始 1(Rd)/2(Ra) 映射为 RP 类型
+		若我是 Source（0）→ 加上 0b000 → 保持 RD/RA
+		✅ 这是一种 巧妙的位运算映射，避免复杂 switch-case。
 	 */
 
 	if (*cc1 != TYPEC_CC_VOLT_OPEN)
@@ -1117,15 +1373,44 @@ static int husb311_get_cc(struct tcpc_device *tcpc, int *cc1, int *cc2)
 	if (*cc2 != TYPEC_CC_VOLT_OPEN)
 		*cc2 |= (act_as_sink << 2);
 
+	/*初始化 PD 接收参数（关键！）
+	根据 当前极性（polarity） 选择使用 CC1 或 CC2 的状态
+	polarity=0 → 使用 CC1（主通道）
+	polarity=1 → 使用 CC2（翻转后主通道）
+	将选中的 CC 状态（如 TYPEC_CC_RP_DEF）传给 husb311_init_cc_params()
+	该函数会据此配置 BMC 接收器偏置（如前文分析），确保 PD 消息正确解码
+	🔄 这是连接建立后、PD 通信前的关键一步！
+
+	若不调用，可能导致 BMC 信号眼图闭合，PD 通信失败*/
 	husb311_init_cc_params(tcpc,
 		(uint8_t)tcpc->typec_polarity ? *cc2 : *cc1);
 
 	return 0;
 }
 
+/*这段代码实现了 HUSB311 芯片的 VSAFE0V 检测使能控制函数 husb311_enable_vsafe0v_detect()，
+用于动态开启或关闭对 VBUS 电压是否真正降至安全零压（≈0V） 的监测功能
+
+作用：控制 HUSB311 是否在 VBUS 下降过程中检测 “VBUS < 阈值（如 0.8V）” 这一安全状态。
+参数：
+enable = true：启用 VSAFE0V 检测中断
+enable = false：禁用该检测
+返回：0 成功，负值表示 I²C 错误
+✅ 此功能是 USB PD 协议中“安全放电”和“角色切换”的关键前提。
+
+什么是 VSAFE0V？
+根据 USB Type-C 和 Power Delivery 规范：
+VSAFE0V：指 VBUS 电压已降至 ≤ 0.8V（典型值），此时可认为：
+无危险残余电压
+可安全开启放电 FET
+可安全切换端口角色（如从 Sink 切回 Source）
+若未确认 VSAFE0V 就操作，可能导致：
+反向电流
+FET 过热
+设备损坏
+标准 TCPCI 无法直接提供精确的 VSAFE0V 信号（仅靠 POWER_STATUS.VBUS_PRES 不够），因此 HUSB311 通过 私有寄存器扩展 实现此功能。*/
 #if 1//def CONFIG_TCPC_VSAFE0V_DETECT_IC
-static int husb311_enable_vsafe0v_detect(
-	struct tcpc_device *tcpc, bool enable)
+static int husb311_enable_vsafe0v_detect(struct tcpc_device *tcpc, bool enable)
 {
 	int ret = husb311_i2c_read8(tcpc, HUSB311_REG_HT_MASK);
 
@@ -1141,35 +1426,51 @@ static int husb311_enable_vsafe0v_detect(
 }
 #endif /* CONFIG_TCPC_VSAFE0V_DETECT_IC */
 
+/*配置Type-C端口的CC引脚终止状态，决定端口角色和行为。
+根据 pull 参数（如 TYPEC_CC_RD, TYPEC_CC_RP_3_0, TYPEC_CC_DRP），配置 HUSB311 的 ROLE_CTRL 寄存器，决定 CC1/CC2 引脚的终端电阻类型*/
 static int husb311_set_cc(struct tcpc_device *tcpc, int pull)
 {
 	int ret;
 	uint8_t data;
+	/*输入参数说明
+	pull 是一个复合值，包含：终端类型（RD--sink/RP--source/DRP）
+	RP 电流等级（DEF/1.5A/3.0A）*/
 	int rp_lvl = TYPEC_CC_PULL_GET_RP_LVL(pull), pull1, pull2;
 
 	HUSB311_INFO("\n");
 	pull = TYPEC_CC_PULL_GET_RES(pull);
-	if (pull == TYPEC_CC_DRP) {
-		data = TCPC_V10_REG_ROLE_CTRL_RES_SET(
-				1, rp_lvl, TYPEC_CC_RD, TYPEC_CC_RD);
-
-		ret = husb311_i2c_write8(
-			tcpc, TCPC_V10_REG_ROLE_CTRL, data);
-
+	if (pull == TYPEC_CC_DRP) {//设置为 DRP（Dual-Role Power）
+		data = TCPC_V10_REG_ROLE_CTRL_RES_SET(1, rp_lvl, TYPEC_CC_RD, TYPEC_CC_RD);
+		ret = husb311_i2c_write8(tcpc, TCPC_V10_REG_ROLE_CTRL, data);
 		if (ret == 0) {
 #if 1//def CONFIG_TCPC_VSAFE0V_DETECT_IC
-			husb311_enable_vsafe0v_detect(tcpc, false);
+			husb311_enable_vsafe0v_detect(tcpc, false);// 关闭 VSAFE0V 检测
 #endif /* CONFIG_TCPC_VSAFE0V_DETECT_IC */
 			ret = husb311_command(tcpc, TCPM_CMD_LOOK_CONNECTION);
 		}
-	} else {
+	} else {	//设置为固定角色（RD 或 RP）
+		/*关键点 1：PR_Swap 期间的 CC 初始化
+		当设备正在执行 Power Role Swap（从 Source 切 Sink），
+		且即将设置为 RD（作为新 Sink），
+		需提前调用 husb311_init_cc_params(TYPEC_CC_VOLT_SNK_DFT)，
+		以配置 BMC 接收器适应 0.55V 默认电压，确保后续 PD 消息能被正确接收。
+		🔸 关键点 2：Attached 状态下的极性处理
+		若已连接（typec_is_attached_src == true）且设置为 RP（作为 Source），
+		则 仅在 active CC 线上施加 Rp，另一根设为 OPEN：
+		c
+		编辑
+		polarity=0 → CC1 active → CC2 = OPEN
+		polarity=1 → CC2 active → CC1 = OPEN
+		这符合 Type-C 规范：连接建立后，非通信 CC 线应悬空
+		💡 此优化可减少功耗并避免信号干扰。*/
 #if IS_ENABLED(CONFIG_USB_POWER_DELIVERY)
+		// 特殊处理：PD 角色切换期间初始化 CC 参数
 		if (pull == TYPEC_CC_RD && tcpc->pd_wait_pr_swap_complete)
 			husb311_init_cc_params(tcpc, TYPEC_CC_VOLT_SNK_DFT);
 #endif	/* CONFIG_USB_POWER_DELIVERY */
 
 		pull1 = pull2 = pull;
-
+		// 极性感知：只在 active CC 上施加终端
 		if ((pull == TYPEC_CC_RP_DFT || pull == TYPEC_CC_RP_1_5 ||
 			pull == TYPEC_CC_RP_3_0) &&
 			tcpc->typec_is_attached_src) {
@@ -1184,16 +1485,26 @@ static int husb311_set_cc(struct tcpc_device *tcpc, int pull)
 
 	return 0;
 }
+/*设置插头方向
+功能
+根据极性选择对应的远程 CC 状态，初始化 PD 接收参数
+配置芯片内部的插头方向寄存器
 
+为什么需要 init_cc_params？
+极性切换后，主通信通道从 CC1 变为 CC2（或反之）
+接收器需根据 新通道的 CC 电压档位（如 0.4V/0.7V）调整偏置
+tcpc->typec_remote_cc[polarity] 存储了对方在该极性下的 CC 状态
+✅ 这确保了 无论正插反插，PD 通信眼图都处于最优状态。
+*/
 static int husb311_set_polarity(struct tcpc_device *tcpc, int polarity)
 {
 	int data;
-
+	// 1. 初始化 BMC 接收器（使用对应 CC 线的状态）
 	data = husb311_init_cc_params(tcpc,
 		tcpc->typec_remote_cc[polarity]);
 	if (data)
 		return data;
-
+	// 2. 设置 PLUG_ORIENT 位（bit0 of TCPC_CTRL）
 	data = husb311_i2c_read8(tcpc, TCPC_V10_REG_TCPC_CTRL);
 	if (data < 0)
 		return data;
@@ -1204,13 +1515,19 @@ static int husb311_set_polarity(struct tcpc_device *tcpc, int polarity)
 	return husb311_i2c_write8(tcpc, TCPC_V10_REG_TCPC_CTRL, data);
 }
 
+/*
+控制 DRP Toggle 占空比
+✅ 功能
+在 DRP 模式下，调整 Rp 状态的占空比
+low_rp = true：降低 Rp 时间比例（如 10%），用于 低功耗场景
+low_rp = false：标准占空比（如 50%），用于 快速连接检测*/
 static int husb311_set_low_rp_duty(struct tcpc_device *tcpc, bool low_rp)
 {
 	uint16_t duty = low_rp ? TCPC_LOW_RP_DUTY : TCPC_NORMAL_RP_DUTY;
 
 	return husb311_i2c_write16(tcpc, HUSB311_REG_DRP_DUTY_CTRL, duty);
 }
-
+//启用/禁用 VCONN 电源（用于供电给 Type-C 电子标签或 Mux 芯片）
 static int husb311_set_vconn(struct tcpc_device *tcpc, int enable)
 {
 	//struct husb311_chip *chip = tcpc_get_dev_data(tcpc);
@@ -1697,7 +2014,7 @@ static int husb311_tcpcdev_init(struct husb311_chip *chip, struct device *dev)
 	成功返回 struct tcpc_dev *，失败返回错误指针
 	🎯 这一步将 HUSB311 纳入内核统一的 Type-C 管理框架
 	*/
-	chip->tcpc = tcpc_device_register(dev, desc, &husb311_tcpc_ops, chip);   -------zxf
+	chip->tcpc = tcpc_device_register(dev, desc, &husb311_tcpc_ops, chip);
 	if (IS_ERR(chip->tcpc))
 		return -EINVAL;
 
@@ -1867,7 +2184,7 @@ devm_ 表示“managed”资源：设备卸载时自动释放，无需手动 kfr
 		绑定 husb311_tcpc_ops 操作集（实现 get_cc、transmit 等接口）。
 	上层 TCPM（Type-C Port Manager） 将通过此接口控制 HUSB311。
 	*/
-	ret = husb311_tcpcdev_init(chip, &client->dev);	//Type-C设备初始化---------zxf
+	ret = husb311_tcpcdev_init(chip, &client->dev);	//Type-C设备初始化
 	if (ret < 0) {
 		dev_err(&client->dev, "husb311 tcpc dev init fail\n");
 		goto err_tcpc_reg;
@@ -1944,6 +2261,21 @@ static int husb311_i2c_remove(struct i2c_client *client)
 }
 
 #if CONFIG_PM
+/*
+系统挂起时：
+husb311_i2c_suspend() → down()成功
+    ↓
+中断发生 → husb311_irq_work_handler() → down()阻塞
+    ↓  
+系统恢复 → husb311_i2c_resume() → up()
+    ↓
+中断处理继续执行
+*/
+
+/*作用：
+当系统进入睡眠状态时调用
+获取挂起锁，阻止后续的I2C访问
+防止在系统挂起过程中访问硬件*/
 static int husb311_i2c_suspend(struct device *dev)
 {
 	struct husb311_chip *chip;
@@ -1952,12 +2284,16 @@ static int husb311_i2c_suspend(struct device *dev)
 	if (client) {
 		chip = i2c_get_clientdata(client);
 		if (chip)
-			down(&chip->suspend_lock);
+			down(&chip->suspend_lock);// 获取挂起锁
 	}
 
 	return 0;
 }
 
+/*作用：
+当系统从睡眠状态恢复时调用
+释放挂起锁，允许正常的I2C操作
+恢复Type-C控制器的正常工作*/
 static int husb311_i2c_resume(struct device *dev)
 {
 	struct husb311_chip *chip;
@@ -1966,7 +2302,7 @@ static int husb311_i2c_resume(struct device *dev)
 	if (client) {
 		chip = i2c_get_clientdata(client);
 		if (chip)
-			up(&chip->suspend_lock);
+			up(&chip->suspend_lock);// 释放挂起锁
 	}
 
 	return 0;
