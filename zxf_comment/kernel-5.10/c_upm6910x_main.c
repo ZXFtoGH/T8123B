@@ -1940,12 +1940,12 @@ static const struct attribute_group upm6910x_main_attr_group = {
 最终效果：系统启动后，该芯片被正确识别 → 注册为充电控制器 → 可以上报电池信息 → 支持插入充电自动检测 → 支持 OTG 输出 → 支持低功耗唤醒。
 */
 static int upm6910x_main_driver_probe(struct i2c_client *client,
-                 const struct i2c_device_id *id)
+                 const struct i2c_device_id *id)    //这是驱动的探测入口函数。当内核发现有一个 I2C 设备（client）与该驱动支持的设备 ID（id）匹配时，就会调用此函数。
 {
-    struct device *dev = &client->dev;
-    struct upm6910x_main_device *upm;
+    struct device *dev = &client->dev;  //从 I2C 客户端结构体中提取出通用的设备结构体指针，方便后续调用通用的设备管理函数。
+    struct upm6910x_main_device *upm;   //声明一个指向自定义设备私有数据结构体的指针。这个结构体（upm6910x_main_device）通常由驱动开发者定义，用来存放该设备运行所需的所有状态和数据。
     int ret = 0;
-    char *name = NULL;
+    char *name = NULL;  //声明一个字符指针（在这段代码片段中暂未使用，可能用于后续获取设备名称）
     pr_info("[%s] enter\n", __func__);
     upm = devm_kzalloc(dev, sizeof(*upm), GFP_KERNEL);
     if (!upm) {
@@ -1957,19 +1957,21 @@ static int upm6910x_main_driver_probe(struct i2c_client *client,
     初始化两个互斥锁：
     lock：保护整个设备操作。
     i2c_rw_lock：初始化I2C读写锁，防止并发 I2C 读写导致数据错乱
+
+    upm->client = client; 和 upm->dev = dev;：将传入的 I2C 客户端指针和通用设备指针，保存到刚刚申请好的私有数据结构体（upm）中。这样，在驱动的其他地方（如读写函数、中断处理函数等），只要拿到了 upm 指针，就能轻松访问到该设备的 I2C 通信句柄。
     */
     upm->client = client;
     upm->dev = dev;
     mutex_init(&upm->lock);
     mutex_init(&upm->i2c_rw_lock);
   
-    i2c_set_clientdata(client, upm);    // 设置客户端数据，将 upm 指针绑定到 i2c_client 上，后续可通过 i2c_get_clientdata(client) 在其他函数中获取
+    i2c_set_clientdata(client, upm);    // 设置客户端数据，将 upm 指针绑定到 i2c_client 上，后续可通过 i2c_get_clientdata(client) 在其他函数中获取  将前面分配并初始化好的私有数据结构体 upm 绑定到 I2C 客户端（client）上。这样做的好处是，以后在驱动的其他地方（比如中断处理函数、文件操作接口等），只需要通过 i2c_get_clientdata(client) 就能轻松取回这个 upm 指针，从而访问设备的所有数据。
     ret = upm6910x_main_hw_chipid_detect(upm);  //调用硬件检测函数读取芯片 ID， 如果返回值不等于预期的型号 ID (UPM6910_MAIN_PN_ID)，说明不是目标芯片或通信失败，直接退出。这是关键的安全检查，避免错误初始化非目标设备。 
     if (ret != UPM6910_MAIN_PN_ID) {
         pr_info("[%s] device not found !!!\n", __func__);
         return ret;
     }
-    ret = upm6910x_main_parse_dt(upm);
+    ret = upm6910x_main_parse_dt(upm);  //调用函数解析设备树（Device Tree）中的相关节点，把配置参数（如GPIO引脚、特定属性等）读取到 upm 结构体中。
     if (ret) {
         pr_info("[%s] upm6910x_main_parse_dt failed !!!\n", __func__);
         // return ret;  //这里没有return，可能是允许部分配置失败
@@ -2041,7 +2043,7 @@ static int upm6910x_main_driver_probe(struct i2c_client *client,
     */
     name = devm_kasprintf(upm->dev, GFP_KERNEL, "%s",
                   "upm6910x_main suspend wakelock");
-    upm->charger_wakelock = wakeup_source_register(NULL, name);
+    upm->charger_wakelock = wakeup_source_register(NULL, name); //向内核注册一个唤醒源。这通常用于充电管理，保证在系统休眠（suspend）时，如果充电芯片有重要事件（如充满、过热），能够唤醒系统进行处理。
 
     /* Register charger device 
     向 MediaTek 的 charger class framework 注册一个充电控制器设备。
@@ -2063,7 +2065,7 @@ static int upm6910x_main_driver_probe(struct i2c_client *client,
     💡 这一步非常重要，使得上层用户空间（如 Android 的 healthd 或 kernel power supply）可以控制充电行为。
     */
     upm->chg_dev = charger_device_register("primary_chg", &client->dev, upm,
-                    &upm6910x_main_chg_ops, &upm6910x_main_chg_props);
+                    &upm6910x_main_chg_ops, &upm6910x_main_chg_props);  //向内核的充电设备框架（Charger Framework）注册这个设备
     if (IS_ERR_OR_NULL(upm->chg_dev)) {
         pr_info("%s: register charger device  failed\n", __func__);
         ret = PTR_ERR(upm->chg_dev);
@@ -2089,11 +2091,11 @@ static int upm6910x_main_driver_probe(struct i2c_client *client,
         延迟执行：等待硬件稳定或避免频繁操作
         任务调度：定期执行检测任务
     */
-    INIT_DELAYED_WORK(&upm->charge_detect_delayed_work, charger_detect_work_func);
+    INIT_DELAYED_WORK(&upm->charge_detect_delayed_work, charger_detect_work_func);  //初始化一个延迟工作队列。它的作用类似于设置一个“定时器任务”，在未来的某个时间点去执行 charger_detect_work_func 函数（通常用于周期性检测充电状态）。
     INIT_DELAYED_WORK(&upm->charge_detect_recheck_delay_work, charge_detect_recheck_delay_work_func);
     
     //初始化电源供应（Power Supply Class）
-    ret = upm6910x_main_power_supply_init(upm, dev);
+    ret = upm6910x_main_power_supply_init(upm, dev);    //向 Linux 内核的电源子系统（Power Supply Class）注册。注册成功后，用户空间（Android 系统或应用）就能在 /sys/class/power_supply/ 目录下看到该设备的信息（如电量、充电状态等）。
     if (ret) {
         pr_err("Failed to register power supply\n");
         return ret;
@@ -2122,7 +2124,7 @@ static int upm6910x_main_driver_probe(struct i2c_client *client,
     upm6910x_main_irq_handler_thread	中断线程处理函数，下半部（bottom half）线程函数
     `IRQF_TRIGGER_FALLING IRQF_ONESHOT`	中断标志        
             IRQF_TRIGGER_FALLING：下降沿触发：当信号从高电平变为低电平时触发中断  适合：低电平有效的中断信号     
-            IRQF_ONESHOT：  一次性中断：中断处理完成后需要重新启用中断           安全特性：防止中断嵌套和重复触发
+            IRQF_ONESHOT：  一次性中断：中断处理完成后需要重新启用中断           安全特性：防止中断嵌套和重复触发   IRQF_ONESHOT：表示在中断线程处理完之前，硬件中断会被屏蔽，防止重复触发。
     dev_name(&client->dev)	            中断名称，（用于 /proc/interrupts 显示）
     upm	                                传递给中断处理函数的私有数据（驱动上下文）
     中断触发方式为下降沿触发（插拔事件）。
