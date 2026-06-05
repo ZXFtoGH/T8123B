@@ -1116,7 +1116,7 @@ static int upm6910x_main_charger_get_property(struct power_supply *psy,
         val->intval = data / 1000;
         break;
     default:
-        return -EINVAL;
+        return -EINVAL; //如果系统请求了一个本驱动不支持的属性，就直接返回‘无效参数’的错误。”
     }
     return ret;
 }
@@ -1185,9 +1185,9 @@ static void charger_detect_work_func(struct work_struct *work)
     online_pre = upm->state.online;             //上次vbus是否在线
 
     mutex_lock(&upm->lock);
-    memcpy(&state, &upm->state, sizeof(upm->state));    // 拷贝状态
-    ret = upm6910x_main_get_state(upm, &state);     // 读取最新硬件状态
-    memcpy(&upm->state, &state, sizeof(state));     // 更新设备状态
+    memcpy(&state, &upm->state, sizeof(upm->state));    // 拷贝状态 将 upm->state 中的数据复制到 state 变量中
+    ret = upm6910x_main_get_state(upm, &state);     // 读取最新硬件状态  将硬件实际状态填充到 state 中
+    memcpy(&upm->state, &state, sizeof(state));     // 更新设备状态  将更新后的状态写回 upm->state    其他线程通过 upm->state 获取最新信息
     mutex_unlock(&upm->lock);
     pr_err("%s v_pre = %d,v_now = %d\n", __func__, vbus_attach_pre, state.vbus_attach);
 
@@ -1247,8 +1247,8 @@ static irqreturn_t upm6910x_main_irq_handler_thread(int irq, void *private)
     struct upm6910x_main_device *upm = private; //获取设备私有数据
     /*
     唤醒锁管理：
-        防止系统睡眠：在处理中断期间保持系统唤醒，唤醒的时间就是UPM6910_MAIN_IRQ_WAKE_TIME，在这个过程完成&upm->charge_detect_delayed_work对应的调度函数
-        超时保护：UPM6910_MAIN_IRQ_WAKE_TIME指定唤醒时间（如2000ms）
+        防止系统睡眠：在处理中断期间保持系统唤醒，唤醒的时间就是 UPM6910_MAIN_IRQ_WAKE_TIME ，在这个过程完成&upm->charge_detect_delayed_work对应的调度函数
+        超时保护：UPM6910_MAIN_IRQ_WAKE_TIME 指定唤醒时间（如2000ms）
         自动释放：超时后自动释放唤醒锁，无需手动释放
     */
     __pm_wakeup_event(upm->charger_wakelock, UPM6910_MAIN_IRQ_WAKE_TIME);
@@ -1625,11 +1625,11 @@ static const struct regulator_desc upm6910x_main_otg_rdesc = {
 */
 static int upm6910x_main_vbus_regulator_register(struct upm6910x_main_device *upm)
 {
-    struct regulator_config config = {};
-    int ret = 0;
+    struct regulator_config config = {}; // 声明并清零配置结构体
+     int ret = 0;
     /* otg regulator */
-    config.dev = upm->dev;
-    config.driver_data = upm;
+    config.dev = upm->dev;               // 绑定父设备节点
+    config.driver_data = upm;            // 绑定私有数据指针
     /*
     这是核心步骤，使用 devm_regulator_register() 注册一个受设备资源管理的 regulator。
     参数	                    含义
