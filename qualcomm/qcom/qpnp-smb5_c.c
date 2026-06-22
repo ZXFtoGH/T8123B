@@ -3109,20 +3109,20 @@ static int smb5_probe(struct platform_device *pdev)
 	/* set driver data before resources request it */
 	platform_set_drvdata(pdev, chip);	//将设备数据结构与platform_device关联
 
-	chg->chg_param.iio_read = smb5_direct_iio_read;
+	chg->chg_param.iio_read = smb5_direct_iio_read;	//提供直接读取/写入ADC的接口
 	chg->chg_param.iio_write = smb5_direct_iio_write;
 
-	rc = smblib_init(chg);
+	rc = smblib_init(chg);	//初始化充电器库函数，创建votable（投票者）系统
 	if (rc < 0) {
 		pr_err("Smblib_init failed rc=%d\n", rc);
 		return rc;
 	}
 
-	rc = smb5_extcon_init(chg);
+	rc = smb5_extcon_init(chg);	//初始化extcon 外部连接器检测（用于USB ID检测）
 	if (rc < 0)
 		goto cleanup;
 
-	rc = smb5_init_hw(chip);
+	rc = smb5_init_hw(chip);	//初始化硬件
 	if (rc < 0) {
 		pr_err("Couldn't initialize hardware rc=%d\n", rc);
 		goto cleanup;
