@@ -2,6 +2,28 @@
 /*
  * Copyright (c) 2018-2021 The Linux Foundation. All rights reserved.
  * Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+ * 
+ * 手机插入充电器
+    │
+    ▼
+[USBIN_PLUGIN_IRQ] 触发 ──→ smb5_usb_plugin_irq_handler()
+    │
+    ▼
+检测充电器类型 (APSD/HVDCP/PD) ──→ smblib_detect_charger_type()
+    │
+    ▼
+设置输入电流限制 ──→ vote(usb_icl_votable, ...)
+    │
+    ▼
+[CHG_STATE_CHANGE_IRQ] ──→ 开始充电
+    │
+    ▼
+持续监控:
+    ├── 温度变化 → [TEMP_CHANGE_IRQ] → 调整电流/电压
+    ├── AICL完成 → [AICL_DONE_IRQ] → 优化输入电流
+    ├── 电池充满 → 进入维护充电
+    └── 异常检测 → 看门狗/错误处理
+ * 
  */
 
 #include <linux/debugfs.h>
@@ -3035,6 +3057,17 @@ int smb5_extcon_init(struct smb_charger *chg)
 	return rc;
 }
 
+/*
+任何步骤失败 → 跳转到错误标签
+    ↓
+free_irq: smb5_free_interrupts(chg)  // 释放中断
+    ↓
+cleanup: smblib_deinit(chg)           // 清理库资源
+    ↓
+platform_set_drvdata(pdev, NULL)      // 清除驱动数据
+    ↓
+返回错误码
+*/
 static int smb5_probe(struct platform_device *pdev)
 {
 	struct smb5 *chip;
@@ -3190,14 +3223,14 @@ static int smb5_probe(struct platform_device *pdev)
 		goto cleanup;
 	}
 
-	rc = smb5_determine_initial_status(chip);
+	rc = smb5_determine_initial_status(chip);	//获取初始状态
 	if (rc < 0) {
 		pr_err("Couldn't determine initial status rc=%d\n",
 			rc);
 		goto cleanup;
 	}
 
-	rc = smb5_request_interrupts(chip);
+	rc = smb5_request_interrupts(chip);	//注册所有充电器相关中断（USB插入、充电状态、温度等）
 	if (rc < 0) {
 		pr_err("Couldn't request interrupts rc=%d\n", rc);
 		goto cleanup;
@@ -3209,21 +3242,21 @@ static int smb5_probe(struct platform_device *pdev)
 		goto free_irq;
 	}
 
-	smb5_create_debugfs(chip);
+	smb5_create_debugfs(chip);		// DebugFS文件
 
-	rc = sysfs_create_groups(&chg->dev->kobj, smb5_groups);
+	rc = sysfs_create_groups(&chg->dev->kobj, smb5_groups);	// Sysfs属性组
 	if (rc < 0) {
 		pr_err("Couldn't create sysfs files rc=%d\n", rc);
 		goto free_irq;
 	}
 
-	rc = smb5_show_charger_status(chip);
+	rc = smb5_show_charger_status(chip);	// 获取充电器状态
 	if (rc < 0) {
 		pr_err("Failed in getting charger status rc=%d\n", rc);
 		goto free_irq;
 	}
 
-	device_init_wakeup(chg->dev, true);
+	device_init_wakeup(chg->dev, true);	// 支持唤醒
 
 	pr_info("QPNP SMB5 probed successfully\n");
 
